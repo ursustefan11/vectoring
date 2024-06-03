@@ -1,0 +1,12 @@
+{
+    "python.terminal.executeInFileDir": false,
+    "python.terminal.activateEnvironment": true,
+    "python.terminal.launchArgs": [
+        "${workspaceFolder}/app.py"
+    ],
+    "todo-tree.tree.showBadges": false,
+    "[python]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "ms-python.black-formatter"
+      }
+}
