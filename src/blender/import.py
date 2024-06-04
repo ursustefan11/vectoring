@@ -4,7 +4,7 @@ from mathutils import Vector
 
 class Configurator:
 
-    def config(self) -> None:
+    def apply(self) -> None:
         self.enable_addons()
         self.reset_scene()
         self.set_units_to_mm()
@@ -15,16 +15,28 @@ class Configurator:
         bpy.context.scene.unit_settings.length_unit = "MILLIMETERS"
 
     def reset_scene(self) -> None:
-        # Switch to object mode and delete all objects
-        bpy.ops.object.mode_set(mode="OBJECT")
-        bpy.ops.object.select_all(action="SELECT")
+        if bpy.context.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        # Select all objects except the camera and light
+        for obj in bpy.context.scene.objects:
+            if obj.type not in ["CAMERA", "LIGHT"]:
+                obj.select_set(True)
+            else:
+                obj.select_set(False)
+
         bpy.ops.object.delete(use_global=False, confirm=False)
 
-        # Remove all collections
         for collection in bpy.data.collections:
-            bpy.data.collections.remove(collection)
+            if collection.name not in ["Camera", "Light"]:
+                bpy.data.collections.remove(collection)
 
-    def create_collections(self) -> list[bpy.types.Collection]:
+    def enable_addons(self) -> None:
+        if not bpy.ops.preferences.addon_enable(module="io_import_dxf"):
+            bpy.ops.preferences.addon_install(module="io_import_dxf")
+
+    @staticmethod
+    def create_collections() -> list[bpy.types.Collection]:
         collection_names = ["body", "engraving", "handles"]
         collections = []
 
@@ -38,22 +50,20 @@ class Configurator:
 
         return collections
 
-    def enable_addons(self) -> None:
-        if not bpy.ops.preferences.addon_enable(module="io_import_dxf"):
-            bpy.ops.preferences.addon_install(module="io_import_dxf")
-
 
 class SVGImporter:
     def __init__(self, path):
         self.path = path
+        self.config = Configurator()
 
-    def run(self):
-        Configurator().config()
+    def main(self):
+        self.config.apply()
+
         if self.import_file():
-            self.extrude_body()
+            self.process_object()
 
     def import_file(self) -> bool:
-        collections = bpy.context.collections
+        collections = self.config.create_collections()
         bpy.ops.import_scene.dxf(filepath=self.path)
         imported_svg = bpy.context.scene.objects
 
@@ -75,24 +85,26 @@ class SVGImporter:
             elif "handle" in obj.name.lower():
                 collections[2].objects.link(obj)
 
-            # Center the object's geometry
-            bbox_center = 0.125 * sum((Vector(b) for b in obj.bound_box), Vector())
-            obj.location = obj.location - bbox_center
+            local_bbox_center = 0.125 * sum(
+                (Vector(b) for b in obj.bound_box), Vector()
+            )
+            obj.location = obj.location - local_bbox_center
+            obj.select_set(True)
+            bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY")
 
     def set_active_object(self, obj) -> None:
+        if bpy.context.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.select_all(action="DESELECT")
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
 
-    def convert_to_mesh(self, obj: bpy.types.Object = None) -> None:
-        if obj is None:
-            obj = bpy.context.view_layer.objects.active
-        if obj and obj.type == "CURVE":
-            self.set_active_object(obj)
-            bpy.ops.object.mode_set(mode="EDIT")
-            bpy.ops.curve.select_all(action="SELECT")
-            bpy.ops.object.mode_set(mode="OBJECT")
-            bpy.ops.object.convert(target="MESH")
+    def convert_to_mesh(self, obj: bpy.types.Object) -> None:
+        self.set_active_object(obj)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.curve.select_all(action="SELECT")
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.ops.object.convert(target="MESH")
 
     def extrude_object(self, object, height: float, fill=True) -> None:
         self.convert_to_mesh(object)
@@ -101,8 +113,9 @@ class SVGImporter:
         bpy.ops.mesh.extrude_region_move(
             TRANSFORM_OT_translate={"value": (0, 0, height)}
         )
+
         if fill:
-            self.fill_face(object)
+            self.fill_face()
 
     def clean_up_mesh(self) -> None:
         bpy.ops.mesh.select_all(action="SELECT")
@@ -119,61 +132,82 @@ class SVGImporter:
         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.mesh.select_all(action="SELECT")
         bpy.ops.mesh.fill()
-        self.clean_up_mesh()
+
+        # self.clean_up_mesh()
 
     def fill_object(self, obj: bpy.types.Object) -> None:
         # Fill the top face
         bpy.ops.object.mode_set(mode="OBJECT")
         obj.data.polygons[0].select = True
-        bpy.ops.object.mode_set(mode="EDIT")
         self.fill_face()
 
         # Fill the bottom face
         bpy.ops.object.mode_set(mode="OBJECT")
         obj.data.polygons[-1].select = True
-        bpy.ops.object.mode_set(mode="EDIT")
         self.fill_face()
+
+    def apply_boolean_modifier(
+        self, target_obj: bpy.types.Object, holes: list[bpy.types.Object]
+    ) -> None:
+        self.set_active_object(target_obj)
+        for hole in holes:
+            bpy.ops.object.modifier_add(type="BOOLEAN")
+            bpy.context.object.modifiers["Boolean"].operation = "DIFFERENCE"
+            bpy.context.object.modifiers["Boolean"].object = hole
+            bpy.ops.object.mode_set(mode="OBJECT")
+            bpy.ops.object.modifier_apply(modifier="Boolean")
 
     def extrude_body(self) -> bool:
         try:
             body_obj = bpy.data.collections["body"].objects[0]
             self.extrude_object(body_obj, height=1.3, fill=True)
-
-            self.add_holes()
         except Exception as e:
-            print(e)
+            print(f"Error while extruding the body: {e}")
             return False
         return True
+
+    def extrude_holes(self) -> bool:
+        hole_obj = bpy.data.collections["handles"].objects[0]
+
+        try:
+            self.extrude_object(hole_obj, height=1.3, fill=True)
+        except Exception as e:
+            print(f"Error while extruding the holes: {e}")
+            return False
+        return True
+
+    def extrude_engraving(self) -> bool:
+        engraving = bpy.data.collections["engraving"].objects[0]
+
+        try:
+            self.extrude_object(engraving, height=0.5, fill=False)
+        except Exception as e:
+            print(f"Error while extruding the engraving: {e}")
+            return False
 
     def add_holes(self) -> bool:
         try:
             body_obj = bpy.data.collections["body"].objects[0]
-            hole_obj = bpy.data.collections["handles"].objects[0]
+            holes = [x for x in bpy.data.collections["handles"].objects]
 
-            self.extrude_object(hole_obj, height=1.3)
+            self.apply_boolean_modifier(body_obj, holes)
 
-            # self.set_active_object(body_obj)
-            body_obj.select_set(True)
-            # The boolean operation code is commented out and can be uncommented if needed
-            # self.apply_boolean_modifier(body_obj, hole_obj)
-
-            bpy.ops.object.select_all(action="DESELECT")
+            # bpy.ops.object.select_all(action="DESELECT")
         except Exception as e:
-            print(f"Could not add hole {hole_obj.name}, {hole_obj.type}")
-            print(e)
+            print(f"Error while adding holes: {e}")
             return False
         return True
 
-    def apply_boolean_modifier(
-        self, target_obj: bpy.types.Object, tool_obj: bpy.types.Object
-    ) -> None:
-        bpy.ops.object.modifier_add(type="BOOLEAN")
-        bpy.context.object.modifiers["Boolean"].operation = "DIFFERENCE"
-        bpy.context.object.modifiers["Boolean"].object = tool_obj
-        bpy.ops.object.mode_set(mode="OBJECT")
-        bpy.ops.object.modifier_apply(modifier="Boolean")
+    def extrude(self) -> None:
+        self.extrude_body()
+        self.extrude_holes()
+        self.extrude_engraving()
+
+    def process_object(self):
+        self.extrude()
+        self.add_holes()
 
 
 svg_file_path = r"C:\GitHub\vectoring\assets\testfile.dxf"
 svg_importer = SVGImporter(svg_file_path)
-svg_importer.run()
+svg_importer.main()
