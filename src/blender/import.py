@@ -219,10 +219,15 @@ class SVGImporter:
             body = bpy.data.collections["body"].objects[0]
             holes = [x for x in bpy.data.collections["handles"].objects]
             self.apply_boolean_modifier(body, holes)
+            self.hide_collection(holes)
         except Exception as e:
             print(f"Error while adding holes: {e}")
             return False
         return True
+
+    def hide_collection(self, collection: bpy.types.Collection) -> None:
+        for obj in collection:
+            obj.hide_viewport = True
 
     def apply_engraving(self) -> bool:
         engraving = [x for x in bpy.data.collections["engraving"].objects]
@@ -230,6 +235,7 @@ class SVGImporter:
         try:
             body = bpy.data.collections["body"].objects[0]
             self.apply_boolean_modifier(body, engraving)
+            self.hide_collection(engraving)
         except Exception as e:
             print(f"Error while engraving: {e}")
             return False
@@ -276,9 +282,9 @@ class SVGImporter:
 
     def process_object(self):
         self.extrude()
-        self.add_holes()
+        # self.add_holes()
         self.apply_engraving()
-        self.set_materials()
+        # self.set_materials()
         # self.add_light((0, 0, 5))
 
 
