@@ -30,7 +30,7 @@ class BlenderWorker:
             self.manipulator.add_holes(body, holes)
             self.manipulator.apply_engraving(body, engraving)
             # self.material_manager.set_materials(body)
-            # self.manipulator.rotate_object(body, 90, 0, -90)
+            self.manipulator.rotate_object(body, 90, 0, -90)
             self.world_objects.create_backdrop_plane()
             self.world_objects.add_lights()
 

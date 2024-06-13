@@ -39,13 +39,36 @@ class ObjectManipulator:
         bpy.context.object.modifiers["Bevel"].segments = segments
         self.apply_modifier(obj, "Bevel")
 
+    # def apply_boolean_modifier(
+    #     self,
+    #     obj: bpy.types.Object,
+    #     target: bpy.types.Object,
+    #     vertex_group_name: str = "",
+    # ) -> None:
+        
+    #     self.set_active_object(obj)
+
+    #     original_vertices = set(tuple(v.co) for v in obj.data.vertices)
+
+    #     bpy.ops.object.modifier_add(type="BOOLEAN")
+    #     bpy.context.object.modifiers["Boolean"].operation = "DIFFERENCE"
+    #     bpy.context.object.modifiers["Boolean"].object = target
+    #     self.apply_modifier(obj, "Boolean")
+
+    #     if len(vertex_group_name):
+    #         new_vertices = []
+    #         for v in obj.data.vertices:
+    #             if tuple(v.co) not in original_vertices and v.co.z != 0:
+    #                 new_vertices.append(v.index)
+    #         self.assign_vertices_to_group(obj, new_vertices, vertex_group_name)
+
     def apply_boolean_modifier(
         self,
         obj: bpy.types.Object,
         target: bpy.types.Object,
         vertex_group_name: str = "",
     ) -> None:
-        
+
         self.set_active_object(obj)
 
         original_vertices = set(tuple(v.co) for v in obj.data.vertices)
@@ -56,11 +79,10 @@ class ObjectManipulator:
         self.apply_modifier(obj, "Boolean")
 
         if len(vertex_group_name):
-            new_vertices = [
-                v.index
-                for v in obj.data.vertices
-                if tuple(v.co) not in original_vertices and v.co.z != 0
-            ]
+            new_vertices = []
+            for v in obj.data.vertices:
+                if 0 <= v.co.z <= 0.9 and tuple(v.co) not in original_vertices:
+                    new_vertices.append(v.index)
             self.assign_vertices_to_group(obj, new_vertices, vertex_group_name)
 
     def apply_modifier(self, obj: bpy.types.Object, modifier_name: str) -> None:
@@ -102,10 +124,13 @@ class ObjectManipulator:
         if obj.name in bpy.data.collections:
             bpy.data.collections.remove(bpy.data.collections[obj.name])
 
+    def hide_object(self, obj: bpy.types.Object) -> None:
+        obj.hide_set(True)
+
     def add_holes(self, body, holes) -> bool:
         try:
             self.apply_boolean_modifier(body, holes)
-            # self.delete_object_and_collection(holes)
+            self.hide_object(holes)
         except Exception as e:
             print(f"Error while adding holes: {e}")
             return False
@@ -118,7 +143,7 @@ class ObjectManipulator:
     ) -> bool:
         try:
             self.apply_boolean_modifier(body, engraving, vertex_group_name="engraving")
-            # self.delete_object_and_collection(engraving)
+            self.hide_object(engraving)
         except Exception as e:
             print(f"Error while applying engraving: {e}")
             return False
