@@ -1,13 +1,14 @@
 import bpy, random, math, bmesh, os
 from mathutils import Vector
+from typing import Optional
 
 
 class Config:
     def apply(self) -> None:
-        # self.enable_addons()
+        # bpy.ops.wm.read_factory_settings(use_empty=True)
+        self.enable_addons()
         self.reset_scene()
         self.set_units_to_mm()
-        # self.set_render_engine_to_gpu()
 
     def set_units_to_mm(self) -> None:
         bpy.context.scene.unit_settings.system = "METRIC"
@@ -30,21 +31,6 @@ class Config:
     def enable_addons(self) -> None:
         if not bpy.ops.preferences.addon_enable(module="io_import_dxf"):
             bpy.ops.preferences.addon_install(module="io_import_dxf")
-
-    def set_render_engine_to_gpu(self) -> None:
-        bpy.context.scene.cycles.device = "GPU"
-        prefs = bpy.context.preferences
-        cprefs = prefs.addons["cycles"].preferences
-
-        for compute_device_type in ("CUDA", "OPENCL", "NONE"):
-            try:
-                cprefs.compute_device_type = compute_device_type
-                break
-            except TypeError:
-                pass
-
-        for device in cprefs.devices:
-            device.use = True
 
     @staticmethod
     def create_collections() -> list[bpy.types.Collection]:
@@ -91,29 +77,22 @@ class Config:
 
 
 class Importer:
-    def __init__(self, path):
-        self.path = path
-
-    def main(self) -> bool:
-        return self.import_file()
-
-    def import_file(self) -> bool:
+    def import_file(self, path: str) -> bool:
         config = Config()
         config.apply()
-        collections = config.create_collections()
-        bpy.ops.import_scene.dxf(filepath=self.path)
+        self.collections = config.create_collections()
+        bpy.ops.import_scene.dxf(filepath=path)
         imported_svg = bpy.context.scene.objects
 
-        if imported_svg:
-            self.organize_imported_objects(imported_svg, collections)
-            return True
-        else:
-            raise ValueError("No objects were imported. Check the DXF file.")
+        # if imported_svg:
+        #     self.organize_imported_objects(imported_svg, self.collections)
+        #     return True
+        # else:
+        #     raise ValueError("No objects were imported. Check the DXF file.")
 
-    def organize_imported_objects(
-        self,
+    def organize_imported_objects(self,
         imported_svg: bpy.types.Object,
-        collections: bpy.types.Collection
+        collections : bpy.types.Collection
     ) -> None:
         
         for obj in imported_svg:
@@ -127,20 +106,13 @@ class Importer:
             elif "handle" in obj.name.lower():
                 collections[2].objects.link(obj)
 
-            local_bbox_center = 0.125 * sum(
-                (Vector(b) for b in obj.bound_box), Vector()
-            )
-            obj.location = obj.location - local_bbox_center
-            obj.select_set(True)
-            bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY")
-
 
 class MaterialManager:
     @staticmethod
     def create_material(
-        name: str,
-        color: tuple,
-        metallic: float = 0.5,
+        name     : str,
+        color    : tuple,
+        metallic : float = 0.5,
         roughness: float = 0.5
     ) -> bpy.types.Material:
         
@@ -154,7 +126,7 @@ class MaterialManager:
 
     @staticmethod
     def apply_material(
-        obj: bpy.types.Object,
+        obj     : bpy.types.Object,
         material: bpy.types.Material
     ) -> None:
         
@@ -165,8 +137,8 @@ class MaterialManager:
 
     @staticmethod
     def assign_material_to_vertex_group(
-        obj: bpy.types.Object,
-        group_name: str,
+        obj           : bpy.types.Object,
+        group_name    : str,
         material_index: int
     ) -> None:
         
@@ -189,38 +161,15 @@ class MaterialManager:
         bpy.ops.object.mode_set(mode="OBJECT")
 
     def create_silver(self):
-        m = self.create_material(name="Silver", color=(0.8, 0.8, 0.8, 1), metallic=1.0, roughness=0.18)
-
-        # noise_texture = m.node_tree.nodes.new('ShaderNodeTexNoise')
-        # noise_texture.inputs['Scale'].default_value = 10.0
-        # noise_texture.inputs['Detail'].default_value = 2.0
-        # noise_texture.inputs['Distortion'].default_value = 0.0
-
-        # color_ramp = m.node_tree.nodes.new('ShaderNodeValToRGB')
-        # color_ramp.color_ramp.elements[0].position = 0.1
-        # color_ramp.color_ramp.elements[0].color = (0.0, 0.0, 0.0, 1.0)
-        # color_ramp.color_ramp.elements[1].position = 0.9
-        # color_ramp.color_ramp.elements[1].color = (1.0, 1.0, 1.0, 1.0)
-
-        # m.node_tree.links.new(noise_texture.outputs['Color'], color_ramp.inputs['Fac'])
-
-        # principled_bsdf = m.node_tree.nodes['Principled BSDF']
-        # m.node_tree.links.new(color_ramp.outputs['Color'], principled_bsdf.inputs['Roughness'])
-
+        m = self.create_material("Silver", color=(0.8, 0.8, 0.8, 1), metallic=1.0, roughness=0.18)
         return m
 
     def create_engraving(self):
-        m = self.create_material(name="engraving", color=(0.0, 0.0, 0.0, 1), metallic=0.2, roughness=0.4)
-        bsdf = m.node_tree.nodes["Principled BSDF"]
-        bump_node = m.node_tree.nodes.new('ShaderNodeBump')
-
-        m.node_tree.links.new(bump_node.outputs['Normal'], bsdf.inputs['Normal'])
+        m = self.create_material("engraving", color=(0.0, 0.0, 0.0, 1), metallic=0.2, roughness=0.4)
         return m
 
     def create_cutout(self):
-        m = self.create_material(
-            name="Cutout", color=(0.2, 0.2, 0.2, 1), metallic=0.0, roughness=1.0
-        )
+        m = self.create_material("Cutout", color=(0.2, 0.2, 0.2, 1), metallic=0.0, roughness=1.0)
         return m
 
     def set_materials(self, body: bpy.types.Object) -> None:
@@ -267,46 +216,41 @@ class WorldObjects:
         bpy.ops.object.shade_smooth()
 
         self.manipulator.rotate_object(plane, 0, 0, 90)
-        plane_material = MaterialManager.create_material(name="BG", color=(0.974967, 0.5, 0.5, 1))
+        plane_material = MaterialManager.create_material("BG", color=(0.974967, 0.5, 0.5, 1))
         MaterialManager.apply_material(plane, plane_material)
 
-    def add_light(
-        self,
-        name: str,
+    def add_light(self,
+        name    : str,
         location: tuple,
-        type: str = "POINT",
-        energy: float = 1000.0,
-        size: float = 1.0,
+        type    : str = "POINT",
+        energy  : float = 1000.0,
+        size    : float = 1.0,
     ) -> bpy.types.Object:
         
         bpy.ops.object.light_add(type=type, location=location)
-        light = bpy.context.active_object
-        light.name = name
+        light             = bpy.context.active_object
+        light.name        = name
         light.data.energy = energy
         if type == "AREA":
             light.data.size = size
         return light
 
     def add_lights(self, facing_object: bpy.types.Object):
-        s = 100
-
-        # l = self.add_light("left", (150, -150, 0), type="AREA", energy=2e6, size=s)
-        # ObjectManipulator.point_object_to_position(l, facing_object.location)
-
         up = self.add_light("up", (-10, 0, 100), type="AREA", energy=2e6, size=800)
         ObjectManipulator.point_object_to_position(up, ((facing_object.location)))
-
-        # r = self.add_light("right", (-10, 0, 0), type="AREA", energy=1e6, size=10)
-        # ObjectManipulator.point_object_to_position(r, -facing_object.location)
-
         back = self.add_light("back", (-100, 0, 250), type="AREA", energy=2e6, size=30)
         ObjectManipulator.point_object_to_position(back, (0, 0, 0))
 
-        # f = self.add_light("f", (150, 150, 50), type="AREA", energy=1e6, size=s)
-        # ObjectManipulator.point_object_to_position(f, facing_object.location)
-
 
 class ObjectManipulator:
+    @staticmethod
+    def set_origin_to_geometry(obj):
+        local_bbox_center = 0.125 * sum((Vector(b) for b in obj.bound_box), Vector())
+        obj.location = obj.location - local_bbox_center
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+        bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY")
+
     def set_active_object(self, obj: bpy.types.Object) -> None:
         if bpy.context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -332,8 +276,7 @@ class ObjectManipulator:
         except Exception as e:
             raise ValueError(f"Error while cleaning up the mesh: {e}")
 
-    def add_bevel(
-        self,
+    def add_bevel(self,
         obj: bpy.types.Object,
         width: float,
         segments: int
@@ -345,12 +288,11 @@ class ObjectManipulator:
         bpy.context.object.modifiers["Bevel"].segments = segments
         self.apply_modifier(obj, "Bevel")
 
-    def apply_boolean_modifier(
-        self,
-        obj: bpy.types.Object,
-        target: bpy.types.Object,
+    def apply_boolean_modifier(self,
+        obj              : bpy.types.Object,
+        target           : bpy.types.Object,
         vertex_group_name: str = "",
-        incl_z: bool = False
+        incl_z           : bool = False
     ) -> None:
         
         self.set_active_object(obj)
@@ -370,17 +312,16 @@ class ObjectManipulator:
             self.assign_vertices_to_group(obj, new_vertices, vertex_group_name)
 
     def apply_modifier(self, obj: bpy.types.Object, modifier_name: str) -> None:
-        override = bpy.context.copy()
-        override["object"] = obj
-        override["active_object"] = obj
+        override                     = bpy.context.copy()
+        override["object"]           = obj
+        override["active_object"]    = obj
         override["selected_objects"] = [obj]
         bpy.ops.object.modifier_apply(modifier=modifier_name)
 
-    def assign_vertices_to_group(
-        self,
-        obj: bpy.types.Object,
+    def assign_vertices_to_group(self,
+        obj           : bpy.types.Object,
         vertex_indices: list,
-        group_name: str
+        group_name    : str
     ) -> None:
         if group_name not in obj.vertex_groups:
             vertex_group = obj.vertex_groups.new(name=group_name)
@@ -389,33 +330,36 @@ class ObjectManipulator:
 
         vertex_group.add(vertex_indices, 1.0, "ADD")
 
-    def add_subdivision_surface(
-        self,
-        obj: bpy.types.Object,
-        levels: int,
+    def add_subdivision_surface(self,
+        obj          : bpy.types.Object,
+        levels       : int,
         render_levels: int,
-        apply: bool = True
+        subdiv_type  : str = "SIMPLE",
+        apply        : bool = True,
     ) -> None:
         self.set_active_object(obj)
+
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         bpy.ops.object.modifier_add(type="SUBSURF")
-        bpy.context.object.modifiers["Subdivision"].subdivision_type = "SIMPLE"
-        bpy.context.object.modifiers["Subdivision"].levels = levels
-        bpy.context.object.modifiers["Subdivision"].render_levels = render_levels
-        if apply:
-            self.apply_modifier(obj, "Subdivision")
-        bpy.ops.object.shade_flat()
+        bpy.context.object.modifiers["Subdivision"].subdivision_type = subdiv_type
+        bpy.context.object.modifiers["Subdivision"].levels           = levels
+        bpy.context.object.modifiers["Subdivision"].render_levels    = render_levels
+        
+        if apply: self.apply_modifier(obj, "Subdivision")
 
-    def delete_object_and_collection(self, obj: bpy.types.Object) -> None:
+    def delete_object(self, obj: bpy.types.Object) -> None:
         obj_name = obj.name
         bpy.data.objects.remove(obj, do_unlink=True)
-        if obj_name in bpy.data.collections:
-            bpy.data.collections.remove(bpy.data.collections[obj_name])
+
+    def remove_collections(self) -> None:
+        for collection in bpy.data.collections:
+            if not collection.objects:
+                bpy.data.collections.remove(collection)
 
     def hide_object(self, obj: bpy.types.Object) -> None:
         obj.hide_set(True)
 
-    def add_holes(self, body, holes) -> bool:
+    def add_holes(self, body: bpy.types.Object, holes: bpy.types.Object) -> bool:
         try:
             self.apply_boolean_modifier(body, holes, vertex_group_name="holes", incl_z=True)
             self.hide_object(holes)
@@ -424,11 +368,7 @@ class ObjectManipulator:
             return False
         return True
 
-    def apply_engraving(
-        self,
-        body: bpy.types.Object,
-        engraving: bpy.types.Object
-    ) -> bool:
+    def apply_engraving(self, body: bpy.types.Object, engraving: bpy.types.Object) -> bool:
         try:
             self.apply_boolean_modifier(body, engraving, vertex_group_name="engraving")
             self.hide_object(engraving)
@@ -437,19 +377,32 @@ class ObjectManipulator:
             return False
         return True
 
+    def add_chain_comp(self, hole: bpy.types.Object, parent: bpy.types.Object) -> None:
+        bpy.ops.mesh.primitive_torus_add(
+            align          = 'WORLD',
+            location       = hole.location,
+            rotation       = (0, 0, 0),
+            major_radius   = 0.56,
+            minor_radius   = 0.1,
+            major_segments = 48,
+            minor_segments = 24
+        )
+        torus = bpy.context.object
+        torus.parent = parent
+
     @staticmethod
     def rotate_object(
         object: bpy.types.Object,
-        rx: float,
-        ry: float,
-        rz: float,
+        rx    : float,
+        ry    : float,
+        rz    : float,
     ) -> None:
         object.rotation_euler[0] = math.radians(rx)
         object.rotation_euler[1] = math.radians(ry)
         object.rotation_euler[2] = math.radians(rz)
 
     @staticmethod
-    def point_object_to_position(obj, target_position):
+    def point_object_to_position(obj: bpy.types.Object, target_position: Optional[Vector]):
         if not isinstance(target_position, Vector):
             target_position = Vector(target_position)
         
@@ -459,17 +412,24 @@ class ObjectManipulator:
         
         obj.rotation_euler = rot_quat.to_euler()
 
+    # @staticmethod
+    # def move_collection(collection_name: str, move_vector: bpy.types.Vector) -> None:
+    #     collection = bpy.data.collections[collection_name]
+    #     for obj in collection.objects:
+    #         obj.location += move_vector
+
 class Extruder:
     def __init__(self, manipulator: ObjectManipulator):
         self.manipulator = manipulator
 
-    def extrude_object(
-        self,
-        obj: bpy.types.Object,
+    def extrude_object(self,
+        obj   : bpy.types.Object,
         height: float,
-        fill: bool = True
+        fill  : bool = True
     ) -> None:
-        
+        """Extrudes a given object by a specified height."""
+        self.manipulator.set_active_object(obj)
+
         if obj.type != "MESH":
             self.manipulator.convert_to_mesh(obj)
  
@@ -480,34 +440,27 @@ class Extruder:
         if fill: self.fill_face()
         self.manipulator.clean_up_mesh(obj)
 
-    def extrude_body(self, body: bpy.types.Object) -> bool:
+    def extrude(self, 
+        obj        : bpy.types.Object,
+        height     : float,
+        bevel      : bool = False,
+        subdivision: bool = False
+    ) -> bool:
+        """Extrudes a given object and optionally adds bevel and subdivision surface."""
         try:
-            self.extrude_object(body, height=0.9)
-            self.manipulator.add_bevel(
-                body,
-                width=random.uniform(0.15, 0.25),
-                segments=random.randint(10, 20),
-            )
-            self.manipulator.add_subdivision_surface(body, levels=1, render_levels=1)
-        except Exception as e:
-            print(f"Error while extruding the body: {e}")
-            return False
-        return True
+            self.extrude_object(obj, height)
+            
+            if bevel:
+                self.manipulator.add_bevel(
+                    obj,
+                    width=random.uniform(0.15, 0.25),
+                    segments=random.randint(10, 20),
+                )
 
-    def extrude_holes(self, hole: bpy.types.Object) -> bool:
-        try:
-            self.extrude_object(hole, height=1.3)
-            self.manipulator.add_subdivision_surface(hole, levels=1, render_levels=1)
+            if subdivision:
+                self.manipulator.add_subdivision_surface(obj, levels=1, render_levels=1, subdiv_type="SIMPLE")
         except Exception as e:
-            print(f"Error while extruding the holes: {e}")
-            return False
-        return True
-
-    def extrude_engraving(self, engraving: bpy.types.Object) -> bool:
-        try:
-            self.extrude_object(engraving, height=0.25)
-        except Exception as e:
-            print(f"Error while extruding the engraving: {e}")
+            print(f"Error while extruding the object: {e}")
             return False
         return True
 
@@ -518,41 +471,51 @@ class Extruder:
 
 
 class BlenderWorker:
-    def __init__(self, path):
-        self.config = Config()
-        self.importer = Importer(path)
-        self.manipulator = ObjectManipulator()
-        self.extruder = Extruder(self.manipulator)
+    def __init__(self):
+        self.config           = Config()
+        self.importer         = Importer()
+        self.manipulator      = ObjectManipulator()
+        self.extruder         = Extruder(self.manipulator)
         self.material_manager = MaterialManager()
-        self.world_objects = WorldObjects()
+        self.world_objects    = WorldObjects()
 
-    def main(self):
-        imported_objects = self.importer.main()
+    def main(self, file_path: str):
+        imported_objects = self.importer.import_file(file_path)
+
         if imported_objects:
-            body = bpy.data.collections["body"].objects[0]
-            holes = bpy.data.collections["handles"].objects[0]
+            body      = bpy.data.collections["body"].objects[0]
+            holes     = bpy.data.collections["handles"].objects[0]
             engraving = bpy.data.collections["engraving"].objects[0]
 
-            self.extruder.extrude_body(body)
-            self.extruder.extrude_holes(holes)
-            self.extruder.extrude_engraving(engraving)
-            self.manipulator.apply_engraving(body, engraving)
-            self.manipulator.add_holes(body, holes)
-            self.material_manager.set_materials(body)
-            self.manipulator.rotate_object(body, 110, 0, -75)
-            self.world_objects.create_backdrop_plane(body)
-            self.world_objects.add_lights(body)
-
-            self.manipulator.delete_object_and_collection(holes)
-            self.manipulator.delete_object_and_collection(engraving)
-
             self.change_settings()
+            # self.world_objects.add_lights(body)
+            # self.world_objects.create_backdrop_plane(body)
+
+            self.extruder.extrude(body, height=0.8, bevel=True, subdivision=False)
+            self.extruder.extrude(holes, height=1.3, subdivision=False)
+            self.extruder.extrude(engraving, height=0.25)
+            
+            self.manipulator.add_chain_comp(holes, body)
+            # self.manipulator.apply_engraving(body, engraving)
+            # self.manipulator.add_holes(body, holes)
+
+            # self.material_manager.set_materials(body)
+            # self.manipulator.set_origin_to_geometry(body)
+            # self.manipulator.rotate_object(body, 110, 0, -75)
+
+            # self.remove_unwanted(holes, engraving)
+            
+    def remove_unwanted(self, holes, engraving):
+        self.manipulator.delete_object(holes)
+        self.manipulator.delete_object(engraving)
+        self.manipulator.remove_collections()
+
 
     def change_settings(self):  
         self.config.set_render_settings()
         self.config.set_camera_settings()
         self.config.set_world_settings()
 
-file_path = r"C:\GitHub\vectoring\assets\testfile.dxf"
-blender_worker = BlenderWorker(file_path)
-blender_worker.main()
+file_path = r"C:\GitHub\vectoring\assets\testfile-necklace.dxf"
+blender_worker = BlenderWorker()
+blender_worker.main(file_path)
