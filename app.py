@@ -5,15 +5,8 @@ from typing import Optional
 
 class Config:
     def apply(self) -> None:
-        # bpy.ops.wm.read_factory_settings(use_empty=True)
-        self.enable_addons()
         self.reset_scene()
         self.set_units_to_mm()
-
-    def set_units_to_mm(self) -> None:
-        bpy.context.scene.unit_settings.system = "METRIC"
-        bpy.context.scene.unit_settings.scale_length = 0.001
-        bpy.context.scene.unit_settings.length_unit = "MILLIMETERS"
 
     def reset_scene(self) -> None:
         if bpy.context.mode != "OBJECT":
@@ -25,34 +18,18 @@ class Config:
         bpy.ops.object.delete(use_global=False, confirm=False)
 
         for collection in bpy.data.collections:
-            if collection.name not in ["Camera", "Light"]:
-                bpy.data.collections.remove(collection)
+            bpy.data.collections.remove(collection)
 
-    def enable_addons(self) -> None:
-        if not bpy.ops.preferences.addon_enable(module="io_import_dxf"):
-            bpy.ops.preferences.addon_install(module="io_import_dxf")
-
-    @staticmethod
-    def create_collections() -> list[bpy.types.Collection]:
-        collection_names = ["body", "engraving", "handles"]
-        collections = []
-
-        for name in collection_names:
-            if name not in bpy.data.collections:
-                coll = bpy.data.collections.new(name)
-                bpy.context.scene.collection.children.link(coll)
-            else:
-                coll = bpy.data.collections[name]
-            collections.append(coll)
-
-        return collections
+    def set_units_to_mm(self) -> None:
+        bpy.context.scene.unit_settings.system = "METRIC"
+        bpy.context.scene.unit_settings.scale_length = 0.001
+        bpy.context.scene.unit_settings.length_unit = "MILLIMETERS"
 
     @staticmethod
     def set_render_settings() -> None:
-        bpy.context.scene.render.engine = "CYCLES"
-        bpy.context.view_layer.update()
-        bpy.context.scene.cycles.device = "GPU"
-        bpy.context.scene.cycles.samples = 100
+        bpy.context.scene.render.engine          = "CYCLES"
+        bpy.context.scene.cycles.device          = "GPU"
+        bpy.context.scene.cycles.samples         = 100
         bpy.context.scene.cycles.preview_samples = 50
 
     @staticmethod
@@ -62,49 +39,30 @@ class Config:
         )
         camera = bpy.context.object
         camera.data.lens = 50
-        ObjectManipulator.point_object_to_position(camera, (0, 0, 0))
         bpy.context.scene.camera = camera
+        ObjectManipulator.point_object_to_position(camera, (0, 0, 0))
 
     @staticmethod
     def set_world_settings() -> None:
-        
         bpy.context.scene.world.use_nodes = True
         env_texture = bpy.context.scene.world.node_tree.nodes.new('ShaderNodeTexEnvironment')
         base_dir = os.path.dirname(os.path.abspath(__file__))
         image_path = os.path.join(base_dir, 'assets', 'studio_small_01_4k.hdr')
-        env_texture.image = bpy.data.images.load(image_path)
-        
+        env_texture.image = bpy.data.images.load(image_path)        
 
 
 class Importer:
     def import_file(self, path: str) -> bool:
-        config = Config()
-        config.apply()
-        self.collections = config.create_collections()
+        Config().apply()
+
         bpy.ops.import_scene.dxf(filepath=path)
-        imported_svg = bpy.context.scene.objects
 
-        # if imported_svg:
-        #     self.organize_imported_objects(imported_svg, self.collections)
-        #     return True
-        # else:
-        #     raise ValueError("No objects were imported. Check the DXF file.")
+        return self.organize_imported_objects(bpy.context.scene.objects)
 
-    def organize_imported_objects(self,
-        imported_svg: bpy.types.Object,
-        collections : bpy.types.Collection
-    ) -> None:
-        
-        for obj in imported_svg:
-            for collection in obj.users_collection:
-                collection.objects.unlink(obj)
-
-            if "body" in obj.name.lower():
-                collections[0].objects.link(obj)
-            elif "engraving" in obj.name.lower():
-                collections[1].objects.link(obj)
-            elif "handle" in obj.name.lower():
-                collections[2].objects.link(obj)
+    def organize_imported_objects(self, imports: list[bpy.types.Object]) -> None:
+        for obj in imports:
+            new = obj.name.split("_")[0].lower()
+            obj.name = new
 
 
 class MaterialManager:
@@ -189,9 +147,6 @@ class MaterialManager:
 
 
 class WorldObjects:
-    def __init__(self):
-        self.manipulator = ObjectManipulator()
-
     def create_backdrop_plane(self, object: bpy.types.Object):
         ref_h = object.dimensions[1] * 0.8
         bpy.ops.mesh.primitive_plane_add(size=400, location=(0, 0, -ref_h))
@@ -215,7 +170,7 @@ class WorldObjects:
 
         bpy.ops.object.shade_smooth()
 
-        self.manipulator.rotate_object(plane, 0, 0, 90)
+        ObjectManipulator.rotate_object(plane, 0, 0, 90)
         plane_material = MaterialManager.create_material("BG", color=(0.974967, 0.5, 0.5, 1))
         MaterialManager.apply_material(plane, plane_material)
 
@@ -238,6 +193,7 @@ class WorldObjects:
     def add_lights(self, facing_object: bpy.types.Object):
         up = self.add_light("up", (-10, 0, 100), type="AREA", energy=2e6, size=800)
         ObjectManipulator.point_object_to_position(up, ((facing_object.location)))
+
         back = self.add_light("back", (-100, 0, 250), type="AREA", energy=2e6, size=30)
         ObjectManipulator.point_object_to_position(back, (0, 0, 0))
 
@@ -251,7 +207,7 @@ class ObjectManipulator:
         obj.select_set(True)
         bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY")
 
-    def set_active_object(self, obj: bpy.types.Object) -> None:
+    def set_active_obj(self, obj: bpy.types.Object) -> None:
         if bpy.context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.select_all(action="DESELECT")
@@ -259,14 +215,14 @@ class ObjectManipulator:
         obj.select_set(True)
 
     def convert_to_mesh(self, obj: bpy.types.Object) -> None:
-        self.set_active_object(obj)
+        self.set_active_obj(obj)
         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.curve.select_all(action="SELECT")
         bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.convert(target="MESH")
 
     def clean_up_mesh(self, target_obj: bpy.types.Object) -> None:
-        self.set_active_object(target_obj)
+        self.set_active_obj(target_obj)
         try:
             bpy.ops.object.mode_set(mode="EDIT")
             bpy.ops.mesh.select_all(action="SELECT")
@@ -282,7 +238,7 @@ class ObjectManipulator:
         segments: int
     ) -> None:
         
-        self.set_active_object(obj)
+        self.set_active_obj(obj)
         bpy.ops.object.modifier_add(type="BEVEL")
         bpy.context.object.modifiers["Bevel"].width = width
         bpy.context.object.modifiers["Bevel"].segments = segments
@@ -295,7 +251,7 @@ class ObjectManipulator:
         incl_z           : bool = False
     ) -> None:
         
-        self.set_active_object(obj)
+        self.set_active_obj(obj)
 
         original_vertices = set(tuple(v.co) for v in obj.data.vertices)
 
@@ -337,7 +293,7 @@ class ObjectManipulator:
         subdiv_type  : str = "SIMPLE",
         apply        : bool = True,
     ) -> None:
-        self.set_active_object(obj)
+        self.set_active_obj(obj)
 
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         bpy.ops.object.modifier_add(type="SUBSURF")
@@ -412,11 +368,6 @@ class ObjectManipulator:
         
         obj.rotation_euler = rot_quat.to_euler()
 
-    # @staticmethod
-    # def move_collection(collection_name: str, move_vector: bpy.types.Vector) -> None:
-    #     collection = bpy.data.collections[collection_name]
-    #     for obj in collection.objects:
-    #         obj.location += move_vector
 
 class Extruder:
     def __init__(self, manipulator: ObjectManipulator):
@@ -428,7 +379,7 @@ class Extruder:
         fill  : bool = True
     ) -> None:
         """Extrudes a given object by a specified height."""
-        self.manipulator.set_active_object(obj)
+        self.manipulator.set_active_obj(obj)
 
         if obj.type != "MESH":
             self.manipulator.convert_to_mesh(obj)
@@ -472,49 +423,46 @@ class Extruder:
 
 class BlenderWorker:
     def __init__(self):
-        self.config           = Config()
-        self.importer         = Importer()
         self.manipulator      = ObjectManipulator()
         self.extruder         = Extruder(self.manipulator)
         self.material_manager = MaterialManager()
         self.world_objects    = WorldObjects()
 
     def main(self, file_path: str):
-        imported_objects = self.importer.import_file(file_path)
+        Importer().import_file(file_path)
 
-        if imported_objects:
-            body      = bpy.data.collections["body"].objects[0]
-            holes     = bpy.data.collections["handles"].objects[0]
-            engraving = bpy.data.collections["engraving"].objects[0]
+        body = bpy.data.objects.get("body")
+        holes = bpy.data.objects.get("handles")
+        engraving = bpy.data.objects.get("engraving")
 
-            self.change_settings()
-            # self.world_objects.add_lights(body)
-            # self.world_objects.create_backdrop_plane(body)
+        self.change_settings()
+        self.world_objects.add_lights(body)
+        self.world_objects.create_backdrop_plane(body)
 
-            self.extruder.extrude(body, height=0.8, bevel=True, subdivision=False)
-            self.extruder.extrude(holes, height=1.3, subdivision=False)
-            self.extruder.extrude(engraving, height=0.25)
+        self.extruder.extrude(body, height=0.8, bevel=True, subdivision=False)
+        self.extruder.extrude(holes, height=1.3, subdivision=False)
+        self.extruder.extrude(engraving, height=0.25)
+        
+        self.manipulator.add_chain_comp(holes, body)
+        self.manipulator.apply_engraving(body, engraving)
+        self.manipulator.add_holes(body, holes)
+
+        self.material_manager.set_materials(body)
+        self.manipulator.set_origin_to_geometry(body)
+        self.manipulator.rotate_object(body, 110, 0, -75)
+
+        # self.remove_unwanted(holes, engraving)
             
-            self.manipulator.add_chain_comp(holes, body)
-            # self.manipulator.apply_engraving(body, engraving)
-            # self.manipulator.add_holes(body, holes)
-
-            # self.material_manager.set_materials(body)
-            # self.manipulator.set_origin_to_geometry(body)
-            # self.manipulator.rotate_object(body, 110, 0, -75)
-
-            # self.remove_unwanted(holes, engraving)
-            
-    def remove_unwanted(self, holes, engraving):
-        self.manipulator.delete_object(holes)
-        self.manipulator.delete_object(engraving)
-        self.manipulator.remove_collections()
+    # def remove_unwanted(self, holes, engraving):
+    #     self.manipulator.delete_object(holes)
+    #     self.manipulator.delete_object(engraving)
+    #     self.manipulator.remove_collections()
 
 
     def change_settings(self):  
-        self.config.set_render_settings()
-        self.config.set_camera_settings()
-        self.config.set_world_settings()
+        Config().set_render_settings()
+        Config().set_camera_settings()
+        Config().set_world_settings()
 
 file_path = r"C:\GitHub\vectoring\assets\testfile-necklace.dxf"
 blender_worker = BlenderWorker()
