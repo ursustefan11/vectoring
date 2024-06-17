@@ -64,6 +64,8 @@ class Importer:
         for obj in imports:
             new = obj.name.split("_")[0].lower()
             obj.name = new
+            if isinstance(obj.data, bpy.types.Curve) and "engraving" not in obj.name:
+                obj.data.resolution_u = 64
 
 
 class MaterialManager:
@@ -344,35 +346,90 @@ class ObjectManipulator:
         return True
 
     def add_chain_comp(self, hole: bpy.types.Object, body: bpy.types.Object) -> None:
-        torus = self.create_chain_link(hole, body)
-        self.assign_parent_material_to_child(body, torus)
+        chain_link = self.create_chain_link(hole, body)
+        self.assign_parent_material_to_child(body, chain_link)
 
-        necklace = self.create_necklace(torus)
-        self.assign_parent_material_to_child(torus, necklace)
+        necklace = self.create_necklace(chain_link)
+        # self.assign_parent_material_to_child(chain_link, necklace)
 
-    def create_necklace(self, chain_link: bpy.types.Object) -> bpy.types.Object:
-        last_link = self.create_chain(chain_link, 20)
+    def create_chain_path(self, chain_link: bpy.types.Object) -> bpy.types.Object:
+        r = 15
+        bpy.ops.curve.primitive_bezier_circle_add(radius=r, location=chain_link.location)
+        curve = bpy.context.object
+        curve.name = "droplet_path"
+        curve.parent = chain_link.parent
+        spline = curve.data.splines[0]
 
-    def create_chain(self, chain_link: bpy.types.Object, num_links: int) -> bpy.types.Object:
-        # Make sure the chain link's origin is at its geometric center
-        bpy.context.view_layer.objects.active = chain_link
+        point = spline.bezier_points[3]
+        point.co.y -= 10 * r
+        point.handle_left_type = 'ALIGNED'
+        point.handle_right_type = 'ALIGNED'
+        point.handle_left = point.co + Vector((r/4, 0, 0))
+        point.handle_right = point.co + Vector((-r/4, 0, 0))
+
+        bpy.context.view_layer.objects.active = curve
         bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS', center='BOUNDS')
+        bbox_height = curve.dimensions[1]
+        curve.location = chain_link.location + Vector((0, bbox_height/2, 0))
 
-        # Calculate the distance between chain links based on the chain link's dimensions
-        link_distance = chain_link.dimensions.y
+        return curve
+    
+    def create_necklace(self, chain_link: bpy.types.Object) -> bpy.types.Object:
+        chain_path = self.create_chain_path(chain_link)
+        chain = self.create_chain()
 
-        # Create the chain
-        for i in range(1, num_links):
-            # Duplicate the chain link
-            new_link = chain_link.copy()
-            new_link.data = chain_link.data.copy()  # This also duplicates the mesh data
-            bpy.context.collection.objects.link(new_link)
+        # chain.parent = chain_path.parent
+        print(f'chain parent after assignment: {chain.parent}') 
 
-            # Position the new link relative to the previous link
-            new_link.location.y += i * link_distance
+        self.set_active_obj(chain_path)
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
 
-        # Return the last link in the chain
-        return new_link
+        self.set_active_obj(chain)
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
+        bpy.ops.object.modifier_add(type='ARRAY')
+        chain.modifiers["Array"].fit_type = 'FIT_CURVE'
+        chain.modifiers["Array"].curve = chain_path
+
+        bpy.ops.object.empty_add(type='PLAIN_AXES', location=chain.location)
+        empty = bpy.context.object
+
+        chain.modifiers["Array"].use_object_offset = True
+        chain.modifiers["Array"].offset_object = empty
+        chain.modifiers["Array"].relative_offset_displace = [0.75, 0, 0]
+
+        self.set_active_obj(chain)
+        bpy.ops.object.modifier_add(type='CURVE')
+        curve_modifier = chain.modifiers["Curve"]
+        curve_modifier.object = chain_path
+        curve_modifier.deform_axis = 'NEG_X'
+
+        bpy.ops.object.select_all(action='DESELECT')
+        empty.select_set(True)
+        bpy.ops.transform.rotate(value=3.14159/2, orient_axis='X')
+
+        return chain
+    
+    def create_chain(self):
+        bpy.ops.mesh.primitive_torus_add(
+            major_radius=0.32,
+            minor_radius=0.09,
+            major_segments=48,
+            minor_segments=33)
+        
+        torus = bpy.context.object
+        torus.name = "chain"
+        bpy.ops.object.mode_set(mode='EDIT')
+        mesh = bmesh.from_edit_mesh(torus.data)
+        
+        for vertex in mesh.verts:
+            if vertex.co.x > 0:
+                vertex.co.x += 0.5
+        
+        bmesh.update_edit_mesh(torus.data)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        
+        return torus
 
 
     def create_chain_link(self, hole: bpy.types.Object, body: bpy.types.Object) -> bpy.types.Object:
