@@ -14,6 +14,7 @@ class Config:
 
         for obj in bpy.context.scene.objects:
             obj.select_set(True)
+            bpy.data.objects.remove(obj, do_unlink=True)
 
         bpy.ops.object.delete(use_global=False, confirm=False)
 
@@ -200,12 +201,19 @@ class WorldObjects:
 
 class ObjectManipulator:
     @staticmethod
-    def set_origin_to_geometry(obj):
-        local_bbox_center = 0.125 * sum((Vector(b) for b in obj.bound_box), Vector())
-        obj.location = obj.location - local_bbox_center
+    def set_geometry_to_origin(obj):
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
         bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY")
+    
+    @staticmethod
+    def set_origin_to_geometry(obj):
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+        bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS', center='BOUNDS')
+
+    def move_object(self, obj: bpy.types.Object, x: float, y: float, z: float) -> None:
+        obj.location = (x, y, z)
 
     def set_active_obj(self, obj: bpy.types.Object) -> None:
         if bpy.context.mode != "OBJECT":
@@ -297,9 +305,10 @@ class ObjectManipulator:
 
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         bpy.ops.object.modifier_add(type="SUBSURF")
-        bpy.context.object.modifiers["Subdivision"].subdivision_type = subdiv_type
-        bpy.context.object.modifiers["Subdivision"].levels           = levels
-        bpy.context.object.modifiers["Subdivision"].render_levels    = render_levels
+        subdiv = bpy.context.object.modifiers["Subdivision"]
+        subdiv.subdivision_type = subdiv_type
+        subdiv.levels           = levels
+        subdiv.render_levels    = render_levels
         
         if apply: self.apply_modifier(obj, "Subdivision")
 
@@ -318,7 +327,7 @@ class ObjectManipulator:
     def add_holes(self, body: bpy.types.Object, holes: bpy.types.Object) -> bool:
         try:
             self.apply_boolean_modifier(body, holes, vertex_group_name="holes", incl_z=True)
-            self.hide_object(holes)
+            # self.delete_object(holes)
         except Exception as e:
             print(f"Error while adding holes: {e}")
             return False
@@ -327,24 +336,76 @@ class ObjectManipulator:
     def apply_engraving(self, body: bpy.types.Object, engraving: bpy.types.Object) -> bool:
         try:
             self.apply_boolean_modifier(body, engraving, vertex_group_name="engraving")
-            self.hide_object(engraving)
+            self.delete_object(engraving)
         except Exception as e:
             print(f"Error while applying engraving: {e}")
             return False
+            
         return True
 
-    def add_chain_comp(self, hole: bpy.types.Object, parent: bpy.types.Object) -> None:
+    def add_chain_comp(self, hole: bpy.types.Object, body: bpy.types.Object) -> None:
+        torus = self.create_chain_link(hole, body)
+        self.assign_parent_material_to_child(body, torus)
+
+        necklace = self.create_necklace(torus)
+        self.assign_parent_material_to_child(torus, necklace)
+
+    def create_necklace(self, chain_link: bpy.types.Object) -> bpy.types.Object:
+        last_link = self.create_chain(chain_link, 20)
+
+    def create_chain(self, chain_link: bpy.types.Object, num_links: int) -> bpy.types.Object:
+        # Make sure the chain link's origin is at its geometric center
+        bpy.context.view_layer.objects.active = chain_link
+        bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS', center='BOUNDS')
+
+        # Calculate the distance between chain links based on the chain link's dimensions
+        link_distance = chain_link.dimensions.y
+
+        # Create the chain
+        for i in range(1, num_links):
+            # Duplicate the chain link
+            new_link = chain_link.copy()
+            new_link.data = chain_link.data.copy()  # This also duplicates the mesh data
+            bpy.context.collection.objects.link(new_link)
+
+            # Position the new link relative to the previous link
+            new_link.location.y += i * link_distance
+
+        # Return the last link in the chain
+        return new_link
+
+
+    def create_chain_link(self, hole: bpy.types.Object, body: bpy.types.Object) -> bpy.types.Object:
+        relative_location = body.location - hole.location
+
+        if abs(relative_location.x) > abs(relative_location.y):
+            axis = Vector((1, 0, 0))
+        else:
+            axis = Vector((0, 1, 0))
+        
+        fudge_factor = 0.56 * 1.77
+        torus_location = (body.location - hole.location) - axis*fudge_factor
+
         bpy.ops.mesh.primitive_torus_add(
             align          = 'WORLD',
-            location       = hole.location,
-            rotation       = (0, 0, 0),
-            major_radius   = 0.56,
-            minor_radius   = 0.1,
+            location       = -torus_location,
+            rotation       = (0, math.pi/2, 0),
+            major_radius   = 0.7,
+            minor_radius   = 0.14,
             major_segments = 48,
             minor_segments = 24
         )
         torus = bpy.context.object
-        torus.parent = parent
+        torus.parent = body
+        bpy.ops.object.shade_smooth()
+        self.delete_object(hole)
+        return torus
+
+    def assign_parent_material_to_child(self, parent: bpy.types.Object, child: bpy.types.Object) -> None:
+        child.data.materials.clear()
+
+        for material in parent.data.materials:
+            child.data.materials.append(material)
 
     @staticmethod
     def rotate_object(
@@ -435,29 +496,23 @@ class BlenderWorker:
         holes = bpy.data.objects.get("handles")
         engraving = bpy.data.objects.get("engraving")
 
-        self.change_settings()
-        self.world_objects.add_lights(body)
-        self.world_objects.create_backdrop_plane(body)
+        # self.change_settings()
+        # self.world_objects.add_lights(body)
+        # self.world_objects.create_backdrop_plane(body)
 
         self.extruder.extrude(body, height=0.8, bevel=True, subdivision=False)
-        self.extruder.extrude(holes, height=1.3, subdivision=False)
+        self.extruder.extrude(holes, height=0.8, subdivision=False)
         self.extruder.extrude(engraving, height=0.25)
         
-        self.manipulator.add_chain_comp(holes, body)
         self.manipulator.apply_engraving(body, engraving)
         self.manipulator.add_holes(body, holes)
-
-        self.material_manager.set_materials(body)
+        self.manipulator.set_origin_to_geometry(holes)
         self.manipulator.set_origin_to_geometry(body)
-        self.manipulator.rotate_object(body, 110, 0, -75)
+        self.material_manager.set_materials(body)
+        self.manipulator.add_chain_comp(holes, body)
 
-        # self.remove_unwanted(holes, engraving)
-            
-    # def remove_unwanted(self, holes, engraving):
-    #     self.manipulator.delete_object(holes)
-    #     self.manipulator.delete_object(engraving)
-    #     self.manipulator.remove_collections()
-
+        # self.manipulator.move_object(body, 0, 0, 0)
+        # self.manipulator.rotate_object(body, 110, 0, -75)
 
     def change_settings(self):  
         Config().set_render_settings()
