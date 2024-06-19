@@ -10,6 +10,8 @@ svgwrite = "*"
 dxfwrite = "*"
 bpy = "*"
 fake-bpy-module = "*"
+ezdxf = "*"
+scipy = "*"
 
 [dev-packages]
 

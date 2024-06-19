@@ -126,12 +126,19 @@ class MaterialManager:
         return m
 
     def create_engraving(self):
-        m = self.create_material("engraving", color=(0.0, 0.0, 0.0, 1), metallic=0.2, roughness=0.4)
+        m = self.create_material("Engraving", color=(0.0, 0.0, 0.0, 1), metallic=0.2, roughness=0.4)
         return m
 
     def create_cutout(self):
-        m = self.create_material("Cutout", color=(0.2, 0.2, 0.2, 1), metallic=0.0, roughness=1.0)
+        m = self.create_material("Cutout", color=(0.1, 0.1, 0.1, 1), metallic=1.0, roughness=0.5)
         return m
+    
+    def create_necklace_silver(self):
+        return self.create_material("NecklaceSilver", color=(0.2, 0.2, 0.2, 1), metallic=1.0, roughness=0.18)
+
+    def create_bg(self):
+         # (0.974967, 0.5, 0.5, 1)
+        return self.create_material("Background", color=(1, 0.6, 0.7843137254901961, 1), metallic=0.5, roughness=1.0)
 
     def set_materials(self, body: bpy.types.Object) -> None:
         silver = self.create_silver()
@@ -174,7 +181,7 @@ class WorldObjects:
         bpy.ops.object.shade_smooth()
 
         ObjectManipulator.rotate_object(plane, 0, 0, 90)
-        plane_material = MaterialManager.create_material("BG", color=(0.974967, 0.5, 0.5, 1))
+        plane_material = MaterialManager().create_bg()
         MaterialManager.apply_material(plane, plane_material)
 
     def add_light(self,
@@ -194,11 +201,17 @@ class WorldObjects:
         return light
 
     def add_lights(self, facing_object: bpy.types.Object):
-        up = self.add_light("up", (-10, 0, 100), type="AREA", energy=2e6, size=800)
-        ObjectManipulator.point_object_to_position(up, ((facing_object.location)))
+        up = self.add_light("up", (-10, 0, 100), type="AREA", energy=4e6, size=800)
+        ObjectManipulator.point_object_to_position(up, facing_object.location)
 
         back = self.add_light("back", (-100, 0, 250), type="AREA", energy=2e6, size=30)
         ObjectManipulator.point_object_to_position(back, (0, 0, 0))
+
+        front = self.add_light("front", (60, -60, 10), type="AREA", energy=0.05e6, size=20)
+        ObjectManipulator.point_object_to_position(front, facing_object.location)
+
+        facing = self.add_light("facing", (0, 0, 100), type="AREA", energy=1e6, size=20)
+        ObjectManipulator.point_object_to_position(facing, facing_object.location)
 
 
 class ObjectManipulator:
@@ -267,7 +280,7 @@ class ObjectManipulator:
 
         bpy.ops.object.modifier_add(type="BOOLEAN")
         bpy.context.object.modifiers["Boolean"].operation = "DIFFERENCE"
-        bpy.context.object.modifiers["Boolean"].object = target
+        bpy.context.object.modifiers["Boolean"].object    = target
         self.apply_modifier(obj, "Boolean")
 
         if len(vertex_group_name):
@@ -320,11 +333,7 @@ class ObjectManipulator:
 
     def remove_collections(self) -> None:
         for collection in bpy.data.collections:
-            if not collection.objects:
-                bpy.data.collections.remove(collection)
-
-    def hide_object(self, obj: bpy.types.Object) -> None:
-        obj.hide_set(True)
+            if not collection.objects: bpy.data.collections.remove(collection)
 
     def add_holes(self, body: bpy.types.Object, holes: bpy.types.Object) -> bool:
         try:
@@ -350,27 +359,37 @@ class ObjectManipulator:
         self.assign_parent_material_to_child(body, chain_link)
 
         necklace = self.create_necklace(chain_link)
-        # self.assign_parent_material_to_child(chain_link, necklace)
+        necklace_material = MaterialManager().create_necklace_silver()
+        MaterialManager().apply_material(necklace, necklace_material)
 
     def create_chain_path(self, chain_link: bpy.types.Object) -> bpy.types.Object:
         r = 15
         bpy.ops.curve.primitive_bezier_circle_add(radius=r, location=chain_link.location)
         curve = bpy.context.object
-        curve.name = "droplet_path"
-        curve.parent = chain_link.parent
         spline = curve.data.splines[0]
 
-        point = spline.bezier_points[3]
-        point.co.y -= 10 * r
-        point.handle_left_type = 'ALIGNED'
-        point.handle_right_type = 'ALIGNED'
-        point.handle_left = point.co + Vector((r/4, 0, 0))
-        point.handle_right = point.co + Vector((-r/4, 0, 0))
+        point                    = spline.bezier_points[3]
+        point.co.y              -= 10 * r
+        point.handle_left_type   = 'ALIGNED'
+        point.handle_right_type  = 'ALIGNED'
+        point.handle_left        = point.co + Vector((r/4, 0, 0))
+        point.handle_right       = point.co + Vector((-r/4, 0, 0))
 
         bpy.context.view_layer.objects.active = curve
         bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS', center='BOUNDS')
         bbox_height = curve.dimensions[1]
-        curve.location = chain_link.location + Vector((0, bbox_height/2, 0))
+
+        pos = chain_link.parent.location - chain_link.matrix_world.translation
+
+        if pos.y > pos.x:
+            fudge = Vector((bbox_height/2+ chain_link.dimensions.length/6, 0, 0))
+        if pos.x > pos.y:
+            fudge = Vector((0, bbox_height/2 + chain_link.dimensions.length/6, 0))
+
+        curve.location = chain_link.location + fudge
+        curve.data.resolution_u = 64
+        curve.name = "necklace_path"
+        curve.parent = chain_link.parent
 
         return curve
     
@@ -378,8 +397,8 @@ class ObjectManipulator:
         chain_path = self.create_chain_path(chain_link)
         chain = self.create_chain()
 
-        # chain.parent = chain_path.parent
-        print(f'chain parent after assignment: {chain.parent}') 
+        chain.location = chain_path.location
+        chain.parent = chain_path.parent
 
         self.set_active_obj(chain_path)
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
@@ -389,19 +408,20 @@ class ObjectManipulator:
 
         bpy.ops.object.modifier_add(type='ARRAY')
         chain.modifiers["Array"].fit_type = 'FIT_CURVE'
-        chain.modifiers["Array"].curve = chain_path
+        chain.modifiers["Array"].curve    = chain_path
 
         bpy.ops.object.empty_add(type='PLAIN_AXES', location=chain.location)
         empty = bpy.context.object
+        empty.parent = chain_path.parent
 
-        chain.modifiers["Array"].use_object_offset = True
-        chain.modifiers["Array"].offset_object = empty
+        chain.modifiers["Array"].use_object_offset        = True
+        chain.modifiers["Array"].offset_object            = empty
         chain.modifiers["Array"].relative_offset_displace = [0.75, 0, 0]
 
         self.set_active_obj(chain)
         bpy.ops.object.modifier_add(type='CURVE')
-        curve_modifier = chain.modifiers["Curve"]
-        curve_modifier.object = chain_path
+        curve_modifier             = chain.modifiers["Curve"]
+        curve_modifier.object      = chain_path
         curve_modifier.deform_axis = 'NEG_X'
 
         bpy.ops.object.select_all(action='DESELECT')
@@ -412,10 +432,10 @@ class ObjectManipulator:
     
     def create_chain(self):
         bpy.ops.mesh.primitive_torus_add(
-            major_radius=0.32,
-            minor_radius=0.09,
-            major_segments=48,
-            minor_segments=33)
+            major_radius   = 0.32/8,
+            minor_radius   = 0.1/7,
+            major_segments = 48,
+            minor_segments = 33)
         
         torus = bpy.context.object
         torus.name = "chain"
@@ -423,8 +443,7 @@ class ObjectManipulator:
         mesh = bmesh.from_edit_mesh(torus.data)
         
         for vertex in mesh.verts:
-            if vertex.co.x > 0:
-                vertex.co.x += 0.5
+            if vertex.co.x > 0: vertex.co.x += 0.07
         
         bmesh.update_edit_mesh(torus.data)
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -450,8 +469,8 @@ class ObjectManipulator:
             major_radius   = 0.7,
             minor_radius   = 0.14,
             major_segments = 48,
-            minor_segments = 24
-        )
+            minor_segments = 24)
+        
         torus = bpy.context.object
         torus.parent = body
         bpy.ops.object.shade_smooth()
@@ -488,26 +507,21 @@ class ObjectManipulator:
 
 
 class Extruder:
-    def __init__(self, manipulator: ObjectManipulator):
-        self.manipulator = manipulator
-
     def extrude_object(self,
         obj   : bpy.types.Object,
         height: float,
         fill  : bool = True
     ) -> None:
-        """Extrudes a given object by a specified height."""
-        self.manipulator.set_active_obj(obj)
+        ObjectManipulator().set_active_obj(obj)
 
-        if obj.type != "MESH":
-            self.manipulator.convert_to_mesh(obj)
+        if obj.type != "MESH": ObjectManipulator().convert_to_mesh(obj)
  
         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.mesh.select_all(action="SELECT")
         bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (0, 0, height)})
 
         if fill: self.fill_face()
-        self.manipulator.clean_up_mesh(obj)
+        ObjectManipulator().clean_up_mesh(obj)
 
     def extrude(self, 
         obj        : bpy.types.Object,
@@ -520,14 +534,13 @@ class Extruder:
             self.extrude_object(obj, height)
             
             if bevel:
-                self.manipulator.add_bevel(
+                ObjectManipulator().add_bevel(
                     obj,
                     width=random.uniform(0.15, 0.25),
-                    segments=random.randint(10, 20),
-                )
+                    segments=random.randint(10, 20))
 
             if subdivision:
-                self.manipulator.add_subdivision_surface(obj, levels=1, render_levels=1, subdiv_type="SIMPLE")
+                ObjectManipulator().add_subdivision_surface(obj, levels=1, render_levels=1, subdiv_type="SIMPLE")
         except Exception as e:
             print(f"Error while extruding the object: {e}")
             return False
@@ -541,8 +554,6 @@ class Extruder:
 
 class BlenderWorker:
     def __init__(self):
-        self.manipulator      = ObjectManipulator()
-        self.extruder         = Extruder(self.manipulator)
         self.material_manager = MaterialManager()
         self.world_objects    = WorldObjects()
 
@@ -553,23 +564,23 @@ class BlenderWorker:
         holes = bpy.data.objects.get("handles")
         engraving = bpy.data.objects.get("engraving")
 
-        # self.change_settings()
-        # self.world_objects.add_lights(body)
-        # self.world_objects.create_backdrop_plane(body)
+        self.change_settings()
+        self.world_objects.add_lights(body)
+        self.world_objects.create_backdrop_plane(body)
 
-        self.extruder.extrude(body, height=0.8, bevel=True, subdivision=False)
-        self.extruder.extrude(holes, height=0.8, subdivision=False)
-        self.extruder.extrude(engraving, height=0.25)
+        Extruder().extrude(body, height=0.8, bevel=True, subdivision=False)
+        Extruder().extrude(holes, height=0.8, subdivision=False)
+        Extruder().extrude(engraving, height=0.25)
         
-        self.manipulator.apply_engraving(body, engraving)
-        self.manipulator.add_holes(body, holes)
-        self.manipulator.set_origin_to_geometry(holes)
-        self.manipulator.set_origin_to_geometry(body)
+        ObjectManipulator().apply_engraving(body, engraving)
+        ObjectManipulator().add_holes(body, holes)
+        ObjectManipulator().set_origin_to_geometry(holes)
+        ObjectManipulator().set_origin_to_geometry(body)
         self.material_manager.set_materials(body)
-        self.manipulator.add_chain_comp(holes, body)
+        ObjectManipulator().add_chain_comp(holes, body)
 
-        # self.manipulator.move_object(body, 0, 0, 0)
-        # self.manipulator.rotate_object(body, 110, 0, -75)
+        ObjectManipulator().move_object(body, 0, 0, 0)
+        ObjectManipulator().rotate_object(body, 110, 0, -75)
 
     def change_settings(self):  
         Config().set_render_settings()
