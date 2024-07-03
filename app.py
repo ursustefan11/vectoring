@@ -364,7 +364,7 @@ class ObjectManipulator:
 
     def create_chain_path(self, chain_link: bpy.types.Object) -> bpy.types.Object:
         r = 15
-        bpy.ops.curve.primitive_bezier_circle_add(radius=r, location=chain_link.location)
+        bpy.ops.curve.primitive_bezier_circle_add(radius=15, location=chain_link.location)
         curve = bpy.context.object
         spline = curve.data.splines[0]
 
@@ -386,10 +386,10 @@ class ObjectManipulator:
         if pos.x > pos.y:
             fudge = Vector((0, bbox_height/2 + chain_link.dimensions.length/6, 0))
 
-        curve.location = chain_link.location + fudge
+        curve.location          = chain_link.location + fudge
         curve.data.resolution_u = 64
-        curve.name = "necklace_path"
-        curve.parent = chain_link.parent
+        curve.name              = "necklace_path"
+        curve.parent            = chain_link.parent
 
         return curve
     
@@ -450,7 +450,6 @@ class ObjectManipulator:
         
         return torus
 
-
     def create_chain_link(self, hole: bpy.types.Object, body: bpy.types.Object) -> bpy.types.Object:
         relative_location = body.location - hole.location
 
@@ -510,28 +509,30 @@ class Extruder:
     def extrude_object(self,
         obj   : bpy.types.Object,
         height: float,
-        fill  : bool = True
+        fill  : str = "BRIDGE"
     ) -> None:
         ObjectManipulator().set_active_obj(obj)
 
         if obj.type != "MESH": ObjectManipulator().convert_to_mesh(obj)
  
+        self.fill_face(fill)
+
         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.mesh.select_all(action="SELECT")
         bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (0, 0, height)})
 
-        if fill: self.fill_face()
         ObjectManipulator().clean_up_mesh(obj)
 
     def extrude(self, 
         obj        : bpy.types.Object,
         height     : float,
         bevel      : bool = False,
-        subdivision: bool = False
+        subdivision: bool = False,
+        fill_type  : str = 'BRIDGE'
     ) -> bool:
         """Extrudes a given object and optionally adds bevel and subdivision surface."""
         try:
-            self.extrude_object(obj, height)
+            self.extrude_object(obj, height, fill_type)
             
             if bevel:
                 ObjectManipulator().add_bevel(
@@ -546,10 +547,13 @@ class Extruder:
             return False
         return True
 
-    def fill_face(self) -> None:
+    def fill_face(self, fill_type: str) -> None:
         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.mesh.select_all(action="SELECT")
-        bpy.ops.mesh.edge_face_add()
+        if fill_type == 'BRIDGE':
+            bpy.ops.mesh.edge_face_add()
+        elif fill_type == 'FILL':
+            bpy.ops.mesh.fill()
 
 
 class BlenderWorker:
@@ -568,9 +572,9 @@ class BlenderWorker:
         self.world_objects.add_lights(body)
         self.world_objects.create_backdrop_plane(body)
 
-        Extruder().extrude(body, height=0.8, bevel=True, subdivision=False)
-        Extruder().extrude(holes, height=0.8, subdivision=False)
-        Extruder().extrude(engraving, height=0.25)
+        Extruder().extrude(body, height=0.8, bevel=True)
+        Extruder().extrude(holes, height=0.8)
+        Extruder().extrude(engraving, height=0.25, fill_type='FILL')
         
         ObjectManipulator().apply_engraving(body, engraving)
         ObjectManipulator().add_holes(body, holes)
@@ -587,6 +591,11 @@ class BlenderWorker:
         Config().set_camera_settings()
         Config().set_world_settings()
 
-file_path = r"C:\GitHub\vectoring\assets\testfile-necklace.dxf"
+    def render_image(self):
+        bpy.context.scene.render.filepath = r"C:\GitHub\vectoring\assets\squirrel.png"
+        bpy.ops.render.render(write_still=True)
+
+file_path = r"C:\GitHub\vectoring\assets\squirrel-ai.dxf"
 blender_worker = BlenderWorker()
 blender_worker.main(file_path)
+blender_worker.render_image()
