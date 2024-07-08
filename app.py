@@ -243,6 +243,8 @@ class ObjectManipulator:
         bpy.ops.curve.select_all(action="SELECT")
         bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.convert(target="MESH")
+        bpy.ops.object.convert(target="CURVE")
+        bpy.ops.object.convert(target="MESH")
 
     def clean_up_mesh(self, target_obj: bpy.types.Object) -> None:
         self.set_active_obj(target_obj)
@@ -250,7 +252,7 @@ class ObjectManipulator:
             bpy.ops.object.mode_set(mode="EDIT")
             bpy.ops.mesh.select_all(action="SELECT")
             bpy.ops.mesh.remove_doubles()
-            bpy.ops.mesh.normals_make_consistent(inside=False)
+            # bpy.ops.mesh.normals_make_consistent(inside=False)
             bpy.ops.object.mode_set(mode="OBJECT")
         except Exception as e:
             raise ValueError(f"Error while cleaning up the mesh: {e}")
@@ -592,10 +594,10 @@ class BlenderWorker:
         Config().set_world_settings()
 
     def render_image(self):
-        bpy.context.scene.render.filepath = r"C:\GitHub\vectoring\assets\squirrel.png"
+        bpy.context.scene.render.filepath = r"C:\GitHub\vectoring\assets\squirrel-test.png"
         bpy.ops.render.render(write_still=True)
 
-file_path = r"C:\GitHub\vectoring\assets\squirrel-ai.dxf"
+file_path = r"C:\GitHub\vectoring\assets\coffee.dxf"
 blender_worker = BlenderWorker()
 blender_worker.main(file_path)
-blender_worker.render_image()
+# blender_worker.render_image()
