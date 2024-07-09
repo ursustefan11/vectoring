@@ -1,6 +1,4 @@
-import cv2, numpy as np, ezdxf, math, os
-import ezdxf
-from scipy.interpolate import splprep, splev
+import cv2, ezdxf, os, ezdxf, numpy as np, requests
 from ezdxf.math import Matrix44
 
 
@@ -15,8 +13,14 @@ class DXFProcessor:
         self.handles   = self.get_handles()
         self.engraving = self.get_engraving()
 
+        self.save_dxf(data['output'])
+
     def process_image(self):
-        img = cv2.imread(os.path.join(os.getcwd(), self.data['input']), cv2.IMREAD_GRAYSCALE)
+        if self.data.get('input_file') is not None:
+            img = cv2.imread(os.path.join(os.getcwd(), self.data['input']), cv2.IMREAD_GRAYSCALE)
+        else:
+            image_array = np.asarray(bytearray(self.data.get('input_content')), dtype=np.uint8)
+            img = cv2.imdecode(image_array, cv2.IMREAD_GRAYSCALE)
         img = cv2.flip(img, 0)
         img = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         img = cv2.GaussianBlur(img, (5, 5), 0)
@@ -106,15 +110,15 @@ class DXFProcessor:
         self.doc.saveas(self.data['output'])
 
 
-def main(data):
-    processor = DXFProcessor(data)
-    processor.save_dxf()
+# def main(data):
+#     processor = DXFProcessor(data)
+#     processor.save_dxf()
 
-if __name__ == "__main__":
-    obj_data = {
-        "obj_type": "necklace",
-        "obj_size": 12,
-        "input": "assets/coffee.png",
-        "output": "assets/coffee.dxf"
-    }
-    main(obj_data)
+# if __name__ == "__main__":
+#     obj_data = {
+#         "obj_type": "necklace",
+#         "obj_size": 12,
+#         "input": "assets/cook.jpg",
+#         "output": "assets/cook.dxf"
+#     }
+#     main(obj_data)
