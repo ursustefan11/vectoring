@@ -1,6 +1,7 @@
 import bpy, random, math, bmesh, os
 from mathutils import Vector
 from typing import Optional
+import json
 
 
 class Config:
@@ -22,9 +23,9 @@ class Config:
             bpy.data.collections.remove(collection)
 
     def set_units_to_mm(self) -> None:
-        bpy.context.scene.unit_settings.system = "METRIC"
+        bpy.context.scene.unit_settings.system       = "METRIC"
         bpy.context.scene.unit_settings.scale_length = 0.001
-        bpy.context.scene.unit_settings.length_unit = "MILLIMETERS"
+        bpy.context.scene.unit_settings.length_unit  = "MILLIMETERS"
 
     @staticmethod
     def set_render_settings() -> None:
@@ -48,7 +49,7 @@ class Config:
         bpy.context.scene.world.use_nodes = True
         env_texture = bpy.context.scene.world.node_tree.nodes.new('ShaderNodeTexEnvironment')
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        image_path = os.path.join(base_dir, 'assets', 'studio_small_01_4k.hdr')
+        image_path = os.path.join(base_dir, 'blender_files', 'studio_small_01_4k.hdr')
         env_texture.image = bpy.data.images.load(image_path)        
 
 
@@ -524,8 +525,8 @@ class Extruder:
 
 
 class BlenderWorker:
-    def __init__(self, data: dict):
-        self.data               = data
+    def __init__(self):
+        self.data               = self.load_data()
         self.material_manager   = MaterialManager()
         self.world_objects      = WorldObjects()
         self.importer           = Importer()
@@ -540,8 +541,14 @@ class BlenderWorker:
         self.finalize_objects()
         self.render_image()
 
+    def load_data(self):
+        json_path = os.path.join(os.path.dirname(__file__), "blender_files" ,"temp.json")
+        with open(json_path, "r") as file:
+            data = json.load(file)
+        return data
+
     def import_objects(self):
-        self.importer.import_file(self.data.get("input"))
+        self.importer.import_file(self.data.get("dxf_file"))
 
     def modify_objects(self):
         body, holes, engraving = self.get_objects()
@@ -584,11 +591,4 @@ class BlenderWorker:
         bpy.context.scene.render.filepath = self.data.get("output")
         bpy.ops.render.render(write_still=True)
 
-obj_data = {
-    "input": r"C:\GitHub\vectoring\assets\cook.dxf",
-    "output": r"C:\GitHub\vectoring\assets\cook.png",
-    "obj_size": 12,
-    "obj_type": "necklace"
-}
-
-blender_worker = BlenderWorker(obj_data)
+blender_worker = BlenderWorker()

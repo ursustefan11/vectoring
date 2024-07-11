@@ -1,25 +1,41 @@
-FROM blender:latest
+FROM python:3.11.6-slim
 
-# Install dependencies
+ENV FLASK_APP=app.py
+ENV FLASK_RUN_HOST=0.0.0.0
+
+ENV BLENDER_VERSION=4.1.0 \
+    BLENDER_URL=https://mirror.clarkson.edu/blender/release/Blender4.1/blender-4.1.0-linux-x64.tar.xz
+
 RUN apt-get update && apt-get install -y \
-    python3-pip \
     libopencv-dev \
     python3-opencv \
+    wget \
+    xz-utils \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python packages
-COPY requirements.txt /workspace/
-RUN pip3 install --no-cache-dir -r /workspace/requirements.txt
+WORKDIR /workspace
 
-# Copy the Python script into the container
-COPY your_script.py /workspace/
+COPY requirements.txt .
 
-# Create output directory
-RUN mkdir -p /workspace/output
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Set the working directory
-WORKDIR /workspace/
+RUN wget -O blender.tar.xz "${BLENDER_URL}"
 
-# Define the entry point for the container
-ENTRYPOINT ["blender", "--background", "--python", "your_script.py", "--"]
+RUN tar -xJf blender.tar.xz -C /usr/local --strip-components=1 \
+    && rm blender.tar.xz
+
+# Find the Blender executable to add its directory to PATH
+RUN find /usr/local -name blender -type f
+
+# Assuming the blender executable is in /usr/local/bin, adjust the PATH
+ENV PATH="/usr/local:${PATH}"
+
+# Verify the Blender installation
+RUN blender --version
+
+COPY . /workspace/
+
+EXPOSE 5000
+
+CMD ["flask", "run", "--host=0.0.0.0"]

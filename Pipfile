@@ -6,15 +6,8 @@ name = "pypi"
 [packages]
 pillow = "*"
 opencv-python = "*"
-svgwrite = "*"
 dxfwrite = "*"
 bpy = "*"
 fake-bpy-module = "*"
 ezdxf = "*"
 flask = "*"
-python-dotenv = "*"
-
-[dev-packages]
-
-[requires]
-python_version = "3.11"

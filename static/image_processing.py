@@ -12,14 +12,18 @@ class DXFProcessor:
         self.body      = self.get_body()
         self.handles   = self.get_handles()
         self.engraving = self.get_engraving()
+        print(data)
 
-        self.save_dxf(data['output'])
-
+    def __call__(self):
+        dxf_path = os.path.join(str(self.data['cwd']), "blender_files", str(self.data['sku']) + '.dxf')
+        return self.save_dxf(dxf_path)
+    
     def process_image(self):
-        if self.data.get('input_file') is not None:
+        if not self.data.get('image_url') and 'input' in self.data:
             img = cv2.imread(os.path.join(os.getcwd(), self.data['input']), cv2.IMREAD_GRAYSCALE)
         else:
-            image_array = np.asarray(bytearray(self.data.get('input_content')), dtype=np.uint8)
+            response = requests.get(self.data.get('image_url'))
+            image_array = np.asarray(bytearray(response.content), dtype=np.uint8)
             img = cv2.imdecode(image_array, cv2.IMREAD_GRAYSCALE)
         img = cv2.flip(img, 0)
         img = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
@@ -33,7 +37,7 @@ class DXFProcessor:
     def get_body(self):
         layer_name = 'body'
         self.add_layer(layer_name)
-        return self.msp.add_circle(center=(0, 0), radius=self.data['obj_size']/2, dxfattribs={'layer': layer_name})
+        return self.msp.add_circle(center=(0, 0), radius=self.data.get('obj_size', 12)/2, dxfattribs={'layer': layer_name})
 
     def get_handles(self):
         diameter: float = 1.3
@@ -106,8 +110,9 @@ class DXFProcessor:
         if layer_name not in self.doc.layers:
             self.doc.layers.new(name=layer_name)
 
-    def save_dxf(self):
-        self.doc.saveas(self.data['output'])
+    def save_dxf(self, file_path: str):
+        self.doc.saveas(file_path)
+        return file_path
 
 
 # def main(data):
@@ -115,10 +120,12 @@ class DXFProcessor:
 #     processor.save_dxf()
 
 # if __name__ == "__main__":
+#     cwd = os.path.join(os.getcwd(), "assets")
 #     obj_data = {
 #         "obj_type": "necklace",
 #         "obj_size": 12,
-#         "input": "assets/cook.jpg",
+#         "sku": "123456",
+#         "input": f"{os.path.join(cwd, "cook.jpg")}",
 #         "output": "assets/cook.dxf"
 #     }
 #     main(obj_data)
