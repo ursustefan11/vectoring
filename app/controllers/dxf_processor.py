@@ -15,7 +15,11 @@ class DXFProcessor:
         print(data)
 
     def __call__(self):
-        dxf_path = os.path.join(str(self.data['cwd']), "blender_files", str(self.data['sku']) + '.dxf')
+        dxf_directory = os.path.join(self.data['cwd'], "blender_files")
+        dxf_path = os.path.join(dxf_directory, str(self.data['sku']) + '.dxf')
+        
+        if not os.path.exists(dxf_directory): os.makedirs(dxf_directory)
+        
         return self.save_dxf(dxf_path)
     
     def process_image(self):

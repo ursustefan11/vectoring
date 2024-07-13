@@ -8,6 +8,7 @@ class Config:
     def apply(self) -> None:
         self.reset_scene()
         self.set_units_to_mm()
+        self.enable_dxf_importer()
 
     def reset_scene(self) -> None:
         if bpy.context.mode != "OBJECT":
@@ -21,6 +22,13 @@ class Config:
 
         for collection in bpy.data.collections:
             bpy.data.collections.remove(collection)
+
+    def enable_dxf_importer(self) -> None:
+        preferences = bpy.context.preferences
+        addon_prefs = preferences.addons
+
+        if "io_import_dxf" not in addon_prefs:
+            bpy.ops.preferences.addon_enable(module="io_import_dxf")
 
     def set_units_to_mm(self) -> None:
         bpy.context.scene.unit_settings.system       = "METRIC"

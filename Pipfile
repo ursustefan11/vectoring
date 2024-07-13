@@ -11,3 +11,8 @@ bpy = "*"
 fake-bpy-module = "*"
 ezdxf = "*"
 flask = "*"
+gunicorn = "*"
+python-dotenv = "*"
+
+[requires]
+python = "3.11.6"
