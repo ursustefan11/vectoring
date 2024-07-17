@@ -65,15 +65,33 @@ class Importer:
     def import_file(self, path: str) -> bool:
         Config().apply()
         bpy.ops.import_scene.dxf(filepath=path)
+        # self.recalculate_normals(bpy.context.scene.objects)
         return self.organize_imported_objects(bpy.context.scene.objects)
 
     def organize_imported_objects(self, imports: list[bpy.types.Object]) -> None:
         for obj in imports:
             new = obj.name.split("_")[0].lower()
             obj.name = new
-            if isinstance(obj.data, bpy.types.Curve) and "engraving" not in obj.name:
-                obj.data.resolution_u = 64
+            if isinstance(obj.data, bpy.types.Curve):
+                obj.data.render_resolution_u = 64
+                # if "engraving" in obj.name: 
+                    # obj.data.dimensions = "2D"
+                    # obj.data.splines[0].use_smooth = True
 
+    def recalculate_normals(self, objects: list[bpy.types.Object]) -> None:
+        for obj in objects:
+            if isinstance(obj.data, bpy.types.Mesh):
+                # Switch to object mode
+                bpy.ops.object.mode_set(mode='OBJECT')
+                # Select the object
+                bpy.context.view_layer.objects.active = obj
+                obj.select_set(True)
+                # Recalculate normals
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.mesh.normals_make_consistent(inside=False)
+                bpy.ops.object.mode_set(mode='OBJECT')
+                obj.select_set(False)
 
 class MaterialManager:
     @staticmethod
@@ -144,7 +162,6 @@ class MaterialManager:
         return self.create_material("NecklaceSilver", color=(0.2, 0.2, 0.2, 1), metallic=1.0, roughness=0.18)
 
     def create_bg(self):
-         # (0.974967, 0.5, 0.5, 1)
         return self.create_material("Background", color=(1, 0.6, 0.7843137254901961, 1), metallic=0.5, roughness=1.0)
 
     def set_materials(self, body: bpy.types.Object) -> None:
@@ -248,8 +265,6 @@ class ObjectManipulator:
         bpy.ops.curve.select_all(action="SELECT")
         bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.convert(target="MESH")
-        bpy.ops.object.convert(target="CURVE")
-        bpy.ops.object.convert(target="MESH")
 
     def clean_up_mesh(self, target_obj: bpy.types.Object) -> None:
         self.set_active_obj(target_obj)
@@ -258,6 +273,7 @@ class ObjectManipulator:
             bpy.ops.mesh.select_all(action="SELECT")
             bpy.ops.mesh.remove_doubles()
             bpy.ops.mesh.normals_make_consistent(inside=False)
+            bpy.ops.mesh.dissolve_degenerate()
             bpy.ops.object.mode_set(mode="OBJECT")
         except Exception as e:
             raise ValueError(f"Error while cleaning up the mesh {target_obj.name}: {e}")
@@ -498,11 +514,16 @@ class Extruder:
         height: float,
         fill: str,
     ) -> None:
+        def fill_face(fill_type: str) -> None:
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.select_all(action="SELECT")
+            if fill_type == 'BRIDGE': bpy.ops.mesh.edge_face_add()
+            elif fill_type == 'FILL': bpy.ops.mesh.fill()
         ObjectManipulator().set_active_obj(obj)
 
         if obj.type != "MESH": ObjectManipulator().convert_to_mesh(obj)
  
-        self.fill_face(fill)
+        fill_face(fill)
 
         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.mesh.select_all(action="SELECT")
@@ -515,7 +536,7 @@ class Extruder:
         height     : float,
         bevel      : bool = False,
         subdivision: bool = False,
-        fill: str = 'BRIDGE',
+        fill: str = 'FILL',
     ) -> bool:
         try:
             self.extrude_object(obj, height, fill)
@@ -524,13 +545,6 @@ class Extruder:
             if subdivision: ObjectManipulator().add_subdivision_surface(obj, 1, 1, "SIMPLE")
         except Exception as e:
             print(f"Error while extruding the object: {e}")
-
-    def fill_face(self, fill_type: str) -> None:
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.select_all(action="SELECT")
-        if fill_type == 'BRIDGE': bpy.ops.mesh.edge_face_add()
-        elif fill_type == 'FILL': bpy.ops.mesh.fill()
-
 
 class BlenderWorker:
     def __init__(self):
@@ -545,9 +559,9 @@ class BlenderWorker:
 
     def main(self):
         self.import_objects()
-        self.modify_objects()
-        self.finalize_objects()
-        self.render_image()
+        # self.modify_objects()
+        # self.finalize_objects()
+        # self.render_image()
 
     def load_data(self):
         json_path = os.path.join(os.path.dirname(__file__), "blender_files" ,"temp.json")
@@ -578,7 +592,7 @@ class BlenderWorker:
 
     def apply_extrusions(self, body, holes, engraving):
         self.extruder.extrude(body, height=0.8, bevel=True)
-        self.extruder.extrude(holes, height=0.8)
+        self.extruder.extrude(holes, height=0.9)
         self.extruder.extrude(engraving, height=0.25, fill='FILL')
 
     def apply_manipulations(self, body, holes, engraving):

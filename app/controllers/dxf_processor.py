@@ -1,5 +1,6 @@
-import cv2, ezdxf, os, ezdxf, numpy as np, requests
+import cv2, ezdxf, os, ezdxf, numpy as np, requests, math
 from ezdxf.math import Matrix44
+from ezdxf import math as dxf_math
 
 
 class DXFProcessor:
@@ -8,19 +9,7 @@ class DXFProcessor:
         self.doc.units = ezdxf.units.MM
         self.msp       = self.doc.modelspace()
         self.data      = data
-
-        self.body      = self.get_body()
-        self.handles   = self.get_handles()
         self.engraving = self.get_engraving()
-        print(data)
-
-    def __call__(self):
-        dxf_directory = os.path.join(self.data['cwd'], "blender_files")
-        dxf_path = os.path.join(dxf_directory, str(self.data['sku']) + '.dxf')
-        
-        if not os.path.exists(dxf_directory): os.makedirs(dxf_directory)
-        
-        return self.save_dxf(dxf_path)
     
     def process_image(self):
         if not self.data.get('image_url') and 'input' in self.data:
@@ -31,105 +20,53 @@ class DXFProcessor:
             img = cv2.imdecode(image_array, cv2.IMREAD_GRAYSCALE)
         img = cv2.flip(img, 0)
         img = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        img = cv2.GaussianBlur(img, (5, 5), 0)
+        img = cv2.GaussianBlur(img, (3, 3), 0)  # Increased kernel size for smoother effect
+
+        kernel = np.ones((1, 1), np.uint8)
+        img = cv2.erode(img, kernel, iterations=1)
+        img = cv2.dilate(img, kernel, iterations=1)
+
         _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         contours, _ = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        filled_contours = [cnt for cnt in contours if cv2.contourArea(cnt) != 0]
 
-        return filled_contours
+        smoothed_contours = []
+        for cnt in contours:
+            epsilon = 0.000125 * cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, epsilon, True)
+            if cv2.contourArea(approx) != 0:
+                smoothed_contours.append(approx)
 
-    def get_body(self):
-        layer_name = 'body'
-        self.add_layer(layer_name)
-        return self.msp.add_circle(center=(0, 0), radius=self.data.get('obj_size', 12)/2, dxfattribs={'layer': layer_name})
-
-    def get_handles(self):
-        diameter: float = 1.3
-
-        if not self.body:
-            print("No entities found in the 'body' layer.")
-            return
-        
-        layer_name = 'handles'
-        self.add_layer(layer_name)
-        center = self.body.dxf.center
-        radius = self.body.dxf.radius
-        handle_y_position = center.y + radius - diameter
-
-        if self.data['obj_type'] == "necklace":
-            return [self.msp.add_circle(center=(center.x, handle_y_position), radius=diameter/2, dxfattribs={'layer': layer_name})]
-        elif self.data['obj_type'] == "bracelet":
-            return [self.msp.add_circle(center=(center.x - radius + diameter, center.y), radius=diameter/2, dxfattribs={'layer': layer_name}),
-            self.msp.add_circle(center=(center.x + radius - diameter, center.y), radius=diameter/2, dxfattribs={'layer': layer_name})]
-
+        return smoothed_contours
+    
     def get_engraving(self):
         layer_name = 'engraving'
+        dxfattribs={'layer': layer_name, 'flags': 1}
         self.add_layer(layer_name)
         elements = []
+        
         for contour in self.process_image():
+            points = contour.reshape(-1, 2).tolist()
             points = [(point[0][0], point[0][1]) for point in contour]
             if points[0] != points[-1]:
                 points.append(points[0])
-            # if len(points) > 5:
-            #     element = self.msp.add_spline(points, dxfattribs={'layer': layer_name})
-            # else:
-            #     element = self.msp.add_lwpolyline(points, dxfattribs={'layer': layer_name}, close=True)
-            element = self.msp.add_lwpolyline(points, dxfattribs={'layer': layer_name})
+            
+            element = self.msp.add_lwpolyline(points, dxfattribs=dxfattribs, close=True)
             elements.append(element)
-        self.fit_engraving_inside_body(elements)
+        
         return elements
-    
-    def fit_engraving_inside_body(self, elements: list):
-        body_center = self.body.dxf.center
-        body_radius = self.body.dxf.radius
 
-        square_side_length = body_radius * (2 ** 0.5)
-
-        square_bbox = (body_center.x - square_side_length / 2, body_center.y - square_side_length / 2,
-                    body_center.x + square_side_length / 2, body_center.y + square_side_length / 2)
-
-        min_x, min_y = float('inf'), float('inf')
-        max_x, max_y = float('-inf'), float('-inf')
-
-        for element in elements:
-            if hasattr(element, 'vertices') and callable(element.vertices):
-                for point in element.vertices():
-                    min_x, min_y = min(min_x, point[0]), min(min_y, point[1])
-                    max_x, max_y = max(max_x, point[0]), max(max_y, point[1])
-
-        engraving_bbox = (min_x, min_y, max_x, max_y)
-
-        scale_x = (square_bbox[2] - square_bbox[0]) / (engraving_bbox[2] - engraving_bbox[0])
-        scale_y = (square_bbox[3] - square_bbox[1]) / (engraving_bbox[3] - engraving_bbox[1])
-        scale = min(scale_x, scale_y)
-
-        translation_x = body_center.x - ((engraving_bbox[2] + engraving_bbox[0]) / 2) * scale
-        translation_y = body_center.y - ((engraving_bbox[3] + engraving_bbox[1]) / 2) * scale
-
-        for element in elements:
-            element.transform(Matrix44.scale(scale, scale, scale))
-            element.transform(Matrix44.translate(translation_x, translation_y, 0))
+    def __call__(self):
+        dxf_directory = os.path.join(self.data['cwd'], "blender_files")
+        dxf_path = os.path.join(dxf_directory, str(self.data['sku']) + '.dxf')
+        if not os.path.exists(dxf_directory): os.makedirs(dxf_directory)
+        
+        return self.save_dxf(dxf_path)
 
     def add_layer(self, layer_name: str):
         if layer_name not in self.doc.layers:
             self.doc.layers.new(name=layer_name)
 
     def save_dxf(self, file_path: str):
-        self.doc.saveas(file_path)
+        self.doc.audit()
+        self.doc.saveas(file_path, encoding='utf-8')
         return file_path
-
-
-# def main(data):
-#     processor = DXFProcessor(data)
-#     processor.save_dxf()
-
-# if __name__ == "__main__":
-#     cwd = os.path.join(os.getcwd(), "assets")
-#     obj_data = {
-#         "obj_type": "necklace",
-#         "obj_size": 12,
-#         "sku": "123456",
-#         "input": f"{os.path.join(cwd, "cook.jpg")}",
-#         "output": "assets/cook.dxf"
-#     }
-#     main(obj_data)

@@ -1,5 +1,7 @@
 # Locals
-assets/
+app/static/archive
+app/static/blender_files/*.dxf
+app/static/blender_files/*.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

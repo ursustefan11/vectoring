@@ -28,8 +28,8 @@ class Controller:
         archive_path = os.path.join(archive_dir, f"{sku}.zip")
 
         with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as archive:
-            archive.write(dxf_file)
-            archive.write(output)
+            archive.write(dxf_file, arcname=os.path.basename(dxf_file))
+            archive.write(output, arcname=os.path.basename(output))
         return archive_path
 
     def get_processed_image(self, data: dict):
@@ -38,7 +38,7 @@ class Controller:
         data['dxf_file'] = DXFProcessor(data)()
 
         self.write_json(data)
-        self.start_blender(data)
+        # self.start_blender(data)
 
         return data
 
