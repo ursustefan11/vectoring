@@ -1,14 +1,14 @@
-import bpy, random, math, bmesh, os
+import bpy, random, math, bmesh, os, time
 from mathutils import Vector
 from typing import Optional
 import json
 
+time_start = time.time()
 
 class Config:
-    def apply(self) -> None:
+    def __init__(self) -> None:
         self.reset_scene()
         self.set_units_to_mm()
-        self.enable_dxf_importer()
 
     def reset_scene(self) -> None:
         if bpy.context.mode != "OBJECT":
@@ -23,30 +23,21 @@ class Config:
         for collection in bpy.data.collections:
             bpy.data.collections.remove(collection)
 
-    def enable_dxf_importer(self) -> None:
-        preferences = bpy.context.preferences
-        addon_prefs = preferences.addons
-
-        if "io_import_dxf" not in addon_prefs:
-            bpy.ops.preferences.addon_enable(module="io_import_dxf")
-
     def set_units_to_mm(self) -> None:
         bpy.context.scene.unit_settings.system       = "METRIC"
         bpy.context.scene.unit_settings.scale_length = 0.001
         bpy.context.scene.unit_settings.length_unit  = "MILLIMETERS"
 
-    @staticmethod
-    def set_render_settings() -> None:
+    def set_render_settings(self) -> None:
         bpy.context.scene.render.engine          = "CYCLES"
         bpy.context.scene.cycles.device          = "GPU"
+        bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'OPTIX'
         bpy.context.scene.cycles.samples         = 100
         bpy.context.scene.cycles.preview_samples = 50
 
     @staticmethod
     def set_camera_settings() -> None:
-        bpy.ops.object.camera_add(
-            enter_editmode=False, align="VIEW", location=(60, 0, 0)
-        )
+        bpy.ops.object.camera_add(enter_editmode=False, align="VIEW", location=(60, 0, 0))
         camera = bpy.context.object
         camera.data.lens = 50
         bpy.context.scene.camera = camera
@@ -55,43 +46,70 @@ class Config:
     @staticmethod
     def set_world_settings() -> None:
         bpy.context.scene.world.use_nodes = True
-        env_texture = bpy.context.scene.world.node_tree.nodes.new('ShaderNodeTexEnvironment')
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        image_path = os.path.join(base_dir, 'blender_files', 'studio_small_01_4k.hdr')
-        env_texture.image = bpy.data.images.load(image_path)        
+        env_texture       = bpy.context.scene.world.node_tree.nodes.new('ShaderNodeTexEnvironment')
+        base_dir          = os.path.dirname(os.path.abspath(__file__))
+        image_path        = os.path.join(base_dir, 'blender_files', 'studio_small_01_4k.hdr')
+        env_texture.image = bpy.data.images.load(image_path)
+
+    def add_world_objects(self, ref_obj: bpy.types.Object) -> None:
+        self.add_lights(ref_obj)
+        self.create_backdrop_plane(ref_obj)
+
+    def create_backdrop_plane(self, object: bpy.types.Object):
+        ref_h = object.dimensions[1] * 0.8
+        bpy.ops.mesh.primitive_plane_add(size=400, location=(0, 0, -ref_h))
+        plane = bpy.context.object
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="DESELECT")
+        bpy.ops.object.mode_set(mode="OBJECT")
+        plane.data.vertices[2].select = True
+        plane.data.vertices[3].select = True
+        bpy.ops.object.mode_set(mode="EDIT")
+
+        bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (0, 0, 200)})
+
+        bpy.ops.mesh.select_all(action="DESELECT")
+        bpy.ops.object.mode_set(mode="OBJECT")
+        plane.data.edges[2].select = True
+        plane.data.edges[6].select = True
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.bevel(offset_type="OFFSET", offset=50, segments=100, profile=0.5)
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+        bpy.ops.object.shade_smooth()
+
+        ObjectManipulator.rotate_object(plane, 0, 0, 90)
+        plane_material = MaterialManager().create_bg()
+        MaterialManager.apply_material(plane, plane_material)
 
 
-class Importer:
-    def import_file(self, path: str) -> bool:
-        Config().apply()
-        bpy.ops.import_scene.dxf(filepath=path)
-        # self.recalculate_normals(bpy.context.scene.objects)
-        return self.organize_imported_objects(bpy.context.scene.objects)
+    def add_lights(self, facing_object: bpy.types.Object):
+        def add_light(
+            name    : str,
+            location: tuple,
+            type    : str = "AREA",
+            energy  : float = 1000.0,
+            size    : float = 1.0) -> bpy.types.Object:
+            
+            bpy.ops.object.light_add(type=type, location=location)
+            light             = bpy.context.active_object
+            light.name        = name
+            light.data.energy = energy
+            if type == "AREA": light.data.size = size
+            return light
+        
+        up = add_light("up", (-10, 0, 100), type="AREA", energy=4e6, size=800)
+        ObjectManipulator.point_object_to_position(up, facing_object.location)
 
-    def organize_imported_objects(self, imports: list[bpy.types.Object]) -> None:
-        for obj in imports:
-            new = obj.name.split("_")[0].lower()
-            obj.name = new
-            if isinstance(obj.data, bpy.types.Curve):
-                obj.data.render_resolution_u = 64
-                # if "engraving" in obj.name: 
-                    # obj.data.dimensions = "2D"
-                    # obj.data.splines[0].use_smooth = True
+        back = add_light("back", (-100, 0, 250), type="AREA", energy=2e6, size=30)
+        ObjectManipulator.point_object_to_position(back, (0, 0, 0))
 
-    def recalculate_normals(self, objects: list[bpy.types.Object]) -> None:
-        for obj in objects:
-            if isinstance(obj.data, bpy.types.Mesh):
-                # Switch to object mode
-                bpy.ops.object.mode_set(mode='OBJECT')
-                # Select the object
-                bpy.context.view_layer.objects.active = obj
-                obj.select_set(True)
-                # Recalculate normals
-                bpy.ops.object.mode_set(mode='EDIT')
-                bpy.ops.mesh.select_all(action='SELECT')
-                bpy.ops.mesh.normals_make_consistent(inside=False)
-                bpy.ops.object.mode_set(mode='OBJECT')
-                obj.select_set(False)
+        front = add_light("front", (60, -60, 10), type="AREA", energy=0.05e6, size=20)
+        ObjectManipulator.point_object_to_position(front, facing_object.location)
+
+        facing = add_light("facing", (0, 0, 100), type="AREA", energy=1e6, size=20)
+        ObjectManipulator.point_object_to_position(facing, facing_object.location)
+
 
 class MaterialManager:
     @staticmethod
@@ -106,8 +124,8 @@ class MaterialManager:
         material.use_nodes = True
         bsdf = material.node_tree.nodes["Principled BSDF"]
         bsdf.inputs["Base Color"].default_value = color
-        bsdf.inputs["Metallic"].default_value = metallic
-        bsdf.inputs["Roughness"].default_value = roughness
+        bsdf.inputs["Metallic"].default_value   = metallic
+        bsdf.inputs["Roughness"].default_value  = roughness
         return material
 
     @staticmethod
@@ -180,63 +198,6 @@ class MaterialManager:
         self.assign_material_to_vertex_group(body, "holes", cutout_index)
 
 
-class WorldObjects:
-    def create_backdrop_plane(self, object: bpy.types.Object):
-        ref_h = object.dimensions[1] * 0.8
-        bpy.ops.mesh.primitive_plane_add(size=400, location=(0, 0, -ref_h))
-        plane = bpy.context.object
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.select_all(action="DESELECT")
-        bpy.ops.object.mode_set(mode="OBJECT")
-        plane.data.vertices[2].select = True
-        plane.data.vertices[3].select = True
-        bpy.ops.object.mode_set(mode="EDIT")
-
-        bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (0, 0, 200)})
-
-        bpy.ops.mesh.select_all(action="DESELECT")
-        bpy.ops.object.mode_set(mode="OBJECT")
-        plane.data.edges[2].select = True
-        plane.data.edges[6].select = True
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.bevel(offset_type="OFFSET", offset=50, segments=100, profile=0.5)
-        bpy.ops.object.mode_set(mode="OBJECT")
-
-        bpy.ops.object.shade_smooth()
-
-        ObjectManipulator.rotate_object(plane, 0, 0, 90)
-        plane_material = MaterialManager().create_bg()
-        MaterialManager.apply_material(plane, plane_material)
-
-    def add_light(self,
-        name    : str,
-        location: tuple,
-        type    : str = "AREA",
-        energy  : float = 1000.0,
-        size    : float = 1.0,
-    ) -> bpy.types.Object:
-        
-        bpy.ops.object.light_add(type=type, location=location)
-        light             = bpy.context.active_object
-        light.name        = name
-        light.data.energy = energy
-        if type == "AREA": light.data.size = size
-        return light
-
-    def add_lights(self, facing_object: bpy.types.Object):
-        up = self.add_light("up", (-10, 0, 100), type="AREA", energy=4e6, size=800)
-        ObjectManipulator.point_object_to_position(up, facing_object.location)
-
-        back = self.add_light("back", (-100, 0, 250), type="AREA", energy=2e6, size=30)
-        ObjectManipulator.point_object_to_position(back, (0, 0, 0))
-
-        front = self.add_light("front", (60, -60, 10), type="AREA", energy=0.05e6, size=20)
-        ObjectManipulator.point_object_to_position(front, facing_object.location)
-
-        facing = self.add_light("facing", (0, 0, 100), type="AREA", energy=1e6, size=20)
-        ObjectManipulator.point_object_to_position(facing, facing_object.location)
-
-
 class ObjectManipulator:
     @staticmethod
     def set_geometry_to_origin(obj):
@@ -259,6 +220,14 @@ class ObjectManipulator:
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
 
+    def cleanup_import(self, obj: bpy.types.Object) -> None:
+        self.set_active_obj(obj)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.curve.select_all(action="SELECT")
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.ops.object.convert(target="MESH")
+        bpy.ops.object.convert(target="CURVE")
+
     def convert_to_mesh(self, obj: bpy.types.Object) -> None:
         self.set_active_obj(obj)
         bpy.ops.object.mode_set(mode="EDIT")
@@ -268,15 +237,11 @@ class ObjectManipulator:
 
     def clean_up_mesh(self, target_obj: bpy.types.Object) -> None:
         self.set_active_obj(target_obj)
-        try:
-            bpy.ops.object.mode_set(mode="EDIT")
-            bpy.ops.mesh.select_all(action="SELECT")
-            bpy.ops.mesh.remove_doubles()
-            bpy.ops.mesh.normals_make_consistent(inside=False)
-            bpy.ops.mesh.dissolve_degenerate()
-            bpy.ops.object.mode_set(mode="OBJECT")
-        except Exception as e:
-            raise ValueError(f"Error while cleaning up the mesh {target_obj.name}: {e}")
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.dissolve_degenerate()
+        bpy.ops.mesh.remove_doubles()
+        bpy.ops.object.mode_set(mode="OBJECT")
 
     def add_bevel(self, obj: bpy.types.Object, width: float, segments: int) -> None:
         self.set_active_obj(obj)
@@ -317,7 +282,7 @@ class ObjectManipulator:
     def assign_vertices_to_group(self, obj: bpy.types.Object, vertex_indices: list, group_name: str) -> None:
         if group_name not in obj.vertex_groups:
             vertex_group = obj.vertex_groups.new(name=group_name)
-        else:
+        else: 
             vertex_group = obj.vertex_groups[group_name]
         vertex_group.add(vertex_indices, 1.0, "ADD")
 
@@ -329,7 +294,6 @@ class ObjectManipulator:
         apply        : bool = True,
     ) -> None:
         self.set_active_obj(obj)
-
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         bpy.ops.object.modifier_add(type="SUBSURF")
         subdiv = bpy.context.object.modifiers["Subdivision"]
@@ -484,7 +448,6 @@ class ObjectManipulator:
 
     def assign_parent_material_to_child(self, parent: bpy.types.Object, child: bpy.types.Object) -> None:
         child.data.materials.clear()
-
         for material in parent.data.materials:
             child.data.materials.append(material)
 
@@ -508,69 +471,19 @@ class ObjectManipulator:
         obj.rotation_euler = rot_quat.to_euler()
 
 
-class Extruder:
-    def extrude_object(self,
-        obj   : bpy.types.Object,
-        height: float,
-        fill: str,
-    ) -> None:
-        def fill_face(fill_type: str) -> None:
-            bpy.ops.object.mode_set(mode="EDIT")
-            bpy.ops.mesh.select_all(action="SELECT")
-            if fill_type == 'BRIDGE': bpy.ops.mesh.edge_face_add()
-            elif fill_type == 'FILL': bpy.ops.mesh.fill()
-        ObjectManipulator().set_active_obj(obj)
-
-        if obj.type != "MESH": ObjectManipulator().convert_to_mesh(obj)
- 
-        fill_face(fill)
-
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.select_all(action="SELECT")
-        bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (0, 0, height)})
-
-        ObjectManipulator().clean_up_mesh(obj)
-
-    def extrude(self, 
-        obj        : bpy.types.Object,
-        height     : float,
-        bevel      : bool = False,
-        subdivision: bool = False,
-        fill: str = 'FILL',
-    ) -> bool:
-        try:
-            self.extrude_object(obj, height, fill)
-            
-            if bevel: ObjectManipulator().add_bevel(obj, random.uniform(0.15, 0.25), random.randint(10, 20))
-            if subdivision: ObjectManipulator().add_subdivision_surface(obj, 1, 1, "SIMPLE")
-        except Exception as e:
-            print(f"Error while extruding the object: {e}")
-
 class BlenderWorker:
     def __init__(self):
         self.data               = self.load_data()
-        self.material_manager   = MaterialManager()
-        self.world_objects      = WorldObjects()
-        self.importer           = Importer()
-        self.extruder           = Extruder()
         self.object_manipulator = ObjectManipulator()
         self.config             = Config()
         self.main()
 
     def main(self):
         self.import_objects()
-        # self.modify_objects()
-        # self.finalize_objects()
+        self.modify_objects()
+        self.finalize_objects()
         # self.render_image()
-
-    def load_data(self):
-        json_path = os.path.join(os.path.dirname(__file__), "blender_files" ,"temp.json")
-        with open(json_path, "r") as file:
-            data = json.load(file)
-        return data
-
-    def import_objects(self):
-        self.importer.import_file(self.data.get("dxf_file"))
+        print(f"Blender process completed in {time.time() - time_start} seconds")
 
     def modify_objects(self):
         body, holes, engraving = self.get_objects()
@@ -579,25 +492,18 @@ class BlenderWorker:
 
     def finalize_objects(self):
         body, holes, _ = self.get_objects()
-        self.world_objects.add_lights(body)
-        self.world_objects.create_backdrop_plane(body)
-        self.material_manager.set_materials(body)
+        self.config.add_world_objects(body)
+        MaterialManager().set_materials(body)
         self.apply_configurations()
 
-    def get_objects(self):
-        body      = bpy.data.objects.get("body")
-        holes     = bpy.data.objects.get("handles")
-        engraving = bpy.data.objects.get("engraving")
-        return body, holes, engraving
-
     def apply_extrusions(self, body, holes, engraving):
-        self.extruder.extrude(body, height=0.8, bevel=True)
-        self.extruder.extrude(holes, height=0.9)
-        self.extruder.extrude(engraving, height=0.25, fill='FILL')
+        self.extrude(body, height=0.8, bevel=True)
+        self.extrude(holes, height=0.9)
+        self.extrude(engraving, height=0.25)
 
     def apply_manipulations(self, body, holes, engraving):
-        self.object_manipulator.apply_engraving(body, engraving)
         self.object_manipulator.add_holes(body, holes)
+        self.object_manipulator.apply_engraving(body, engraving)
         self.object_manipulator.set_origin_to_geometry(holes)
         self.object_manipulator.set_origin_to_geometry(body)
         self.object_manipulator.add_chain_comp(holes, body)
@@ -613,4 +519,49 @@ class BlenderWorker:
         bpy.context.scene.render.filepath = self.data.get("output")
         bpy.ops.render.render(write_still=True)
 
-blender_worker = BlenderWorker()
+    def import_objects(self) -> bool:
+        bpy.ops.import_scene.dxf(filepath = self.data.get('dxf_file'))
+        for obj in bpy.context.scene.objects:
+            new = obj.name.split("_")[0].lower()
+            obj.name = new
+            ObjectManipulator().cleanup_import(obj)
+            if isinstance(obj.data, bpy.types.Curve):
+                obj.data.dimensions          = "2D"
+                obj.data.fill_mode           = "BOTH"
+                obj.data.resolution_u        = 64
+                obj.data.resolution_v        = 64
+                obj.data.render_resolution_v = 64
+            ObjectManipulator().convert_to_mesh(obj)
+            ObjectManipulator().clean_up_mesh(obj)
+            if 'engraving' in obj.name: obj.location.z = -0.01
+
+    def load_data(self):
+        json_path = os.path.join(os.path.dirname(__file__), "blender_files" ,"temp.json")
+        with open(json_path, "r") as file:
+            data = json.load(file)
+        return data
+    
+    def get_objects(self):
+        return bpy.data.objects.get("body"), bpy.data.objects.get("handles"), bpy.data.objects.get("engraving")
+    
+    def extrude_object(self, obj: bpy.types.Object, height: float, fill: str,) -> None:
+        def fill_face(fill_type: str) -> None:
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.select_all(action="SELECT")
+            if fill_type == 'BRIDGE': bpy.ops.mesh.edge_face_add()
+            elif fill_type == 'FILL': bpy.ops.mesh.fill()
+            
+        ObjectManipulator().set_active_obj(obj)
+        
+        # if len(fill): fill_face(fill)
+
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.extrude_region_move(TRANSFORM_OT_translate={"value": (0, 0, height)})
+        
+    def extrude(self, obj: bpy.types.Object, height: float, bevel: bool = False, subdivision: bool = False, fill: str = "") -> bool:
+        self.extrude_object(obj, height, fill)
+        if bevel      : ObjectManipulator().add_bevel(obj, random.uniform(0.15, 0.25), random.randint(10, 20))
+        if subdivision: ObjectManipulator().add_subdivision_surface(obj, 1, 1, "SIMPLE")
+
+BlenderWorker()

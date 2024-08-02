@@ -14,6 +14,10 @@ def hello():
     
     data = {field: request.form.get(field, default) for field, default in expected_fields.items()}
     return send_file(Controller(data)())
+# TODO 
+# SKU needs to be integer
+# obj_size needs to be integer
+
 
 # @app.route('/view-data')
 # def view_data():

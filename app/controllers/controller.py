@@ -1,13 +1,6 @@
 import os, subprocess, json, zipfile
 from . import DXFProcessor
 
-#get data
-#process image
-#save dxf
-#write json
-#start blender
-#archive files
-#return archived files
 
 class Controller:
     def __init__(self, data) -> None:
@@ -38,7 +31,7 @@ class Controller:
         data['dxf_file'] = DXFProcessor(data)()
 
         self.write_json(data)
-        # self.start_blender(data)
+        self.start_blender(data)
 
         return data
 
