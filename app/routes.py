@@ -1,7 +1,7 @@
 from flask import request, send_file
-
 from app import app
 from app.controllers import Controller
+import os
 
 @app.route('/', methods=['POST'])
 def hello():
@@ -13,7 +13,14 @@ def hello():
     }
     
     data = {field: request.form.get(field, default) for field, default in expected_fields.items()}
-    return send_file(Controller(data)())
+    response = send_file(Controller(data)())
+
+    # Stop the Docker container
+    container_id = os.getenv('HOSTNAME')
+    os.system(f'docker stop {container_id}')
+
+    return response
+
 # TODO 
 # SKU needs to be integer
 # obj_size needs to be integer

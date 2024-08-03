@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     python3-opencv \
     wget \
     xz-utils \
+    nginx \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -27,6 +28,8 @@ ENV PATH="/usr/local:${PATH}"
 
 RUN blender --version
 
-EXPOSE 8000
+COPY nginx.conf /etc/nginx/nginx.conf
 
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8000", "--timeout", "600", "app:app"]
+EXPOSE 80 8000
+
+CMD ["sh", "-c", "nginx && gunicorn -w 4 -b 0.0.0.0:8000 --timeout 300 app:app"]

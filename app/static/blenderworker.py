@@ -482,7 +482,7 @@ class BlenderWorker:
         self.import_objects()
         self.modify_objects()
         self.finalize_objects()
-        # self.render_image()
+        self.render_image()
         print(f"Blender process completed in {time.time() - time_start} seconds")
 
     def modify_objects(self):
@@ -520,6 +520,8 @@ class BlenderWorker:
         bpy.ops.render.render(write_still=True)
 
     def import_objects(self) -> bool:
+        if not bpy.context.preferences.addons.get('io_import_dxf'):
+            bpy.ops.preferences.addon_enable(module='io_import_dxf')
         bpy.ops.import_scene.dxf(filepath = self.data.get('dxf_file'))
         for obj in bpy.context.scene.objects:
             new = obj.name.split("_")[0].lower()

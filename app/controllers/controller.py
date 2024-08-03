@@ -1,4 +1,5 @@
 import os, subprocess, json, zipfile
+from flask import current_app
 from . import DXFProcessor
 
 
@@ -14,6 +15,9 @@ class Controller:
         dxf_file = data.get('dxf_file')
         output = data.get('output')
         sku = data.get('sku')
+
+        if current_app.debug:
+            return output
 
         archive_dir = os.path.join(self.data.get('cwd'), 'archive')
         if not os.path.exists(archive_dir): os.makedirs(archive_dir)
@@ -39,9 +43,9 @@ class Controller:
         script_path = os.path.join(data["cwd"], "blenderworker.py")
         
         if os.getenv('BLENDER_URL'):
-            command = ["blender", "-b", "-P", script_path]
+            command = ["blender", "-b", "-P", script_path, "--log-level", "0"]
         else:
-            blender_path = os.getenv('blender', r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe")
+            blender_path = os.getenv('blender', r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe")
             command = [blender_path, "--background", "--python", script_path]
         
         subprocess.run(command)
