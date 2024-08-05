@@ -1,44 +1,82 @@
-import ezdxf, os, ezdxf, requests, math, numpy as np
+import ezdxf, os, ezdxf, requests, math, numpy as np, svgwrite
 from ezdxf.math import Matrix44
 from io import BytesIO
-from skimage import io, transform, filters, measure, morphology
+from skimage import io, transform, filters, measure
+
+
+class ImageProcessor:
+    @staticmethod
+    def process_image(image_url, target: str):
+        response = requests.get(image_url)
+        response.raise_for_status()
+        img = io.imread(BytesIO(response.content), as_gray=True)
+        img = transform.resize(img, (img.shape[0] * 2, img.shape[1] * 2), anti_aliasing=True)
+        img = filters.gaussian(img, sigma=1.5)
+        if   target == 'dxf': img = np.fliplr(img)
+        elif target == 'svg': img = np.rot90(img)
+        threshold_value = filters.threshold_otsu(img)
+        binary = img > threshold_value
+        contours = measure.find_contours(binary, level=0.8, fully_connected='high')
+        smoothed_contours = [measure.approximate_polygon(contour, tolerance=2.0) for contour in contours]
+        return smoothed_contours
+
+class SVGProcessor:
+    def __init__(self, data):
+        self.data = data
+
+    def get_svg_file(self):
+        image_url = self.data.get('image_url')
+        contours = ImageProcessor.process_image(image_url, target='svg')
+        svg_content = self.create_svg(contours)
+        svg_file_path = self.save_svg(svg_content)
+        return svg_file_path
+
+    def create_svg(self, contours):
+        dwg = svgwrite.Drawing()
+        for contour in contours:
+            points = [(x, y) for x, y in contour]
+            dwg.add(dwg.polyline(points, stroke='black', fill='none'))
+        return dwg
+
+    def save_svg(self, svg_content):
+        svg_file_path = os.path.join(self.data.get('cwd'), f"{self.data.get('obj_name')}.svg")
+        svg_content.saveas(svg_file_path)
+        return svg_file_path
 
 
 class DXFProcessor:
     def __init__(self, data: dict):
-        self.doc       = ezdxf.new(dxfversion='R2010')
-        self.doc.units = ezdxf.units.MM
+        self.doc       = ezdxf.new(dxfversion='R2018', units=ezdxf.units.MM)
         self.msp       = self.doc.modelspace()
         self.data      = data
         self.body      = self.get_body()
         self.handles   = self.get_handles()
         self.engraving = self.get_engraving()
 
-    def __call__(self):
+    def get_dxf(self):
         dxf_directory = os.path.join(self.data['cwd'], "blender_files")
         dxf_path = os.path.join(dxf_directory, str(self.data['sku']) + '.dxf')
         if not os.path.exists(dxf_directory): os.makedirs(dxf_directory)
-        return self.save_dxf(dxf_path)
-
-    def process_image(self):
-        if not self.data.get('image_url') and 'input' in self.data:
-            img = io.imread(self.data['input'], as_gray=True)
-        else:
-            response = requests.get(self.data.get('image_url'))
-            img = io.imread(BytesIO(response.content), as_gray=True)
-        
-        img = transform.resize(img, (img.shape[0] * 2, img.shape[1] * 2), anti_aliasing=True)
-        img = filters.gaussian(img, sigma=1)
-        img = np.fliplr(img)
-        threshold_value = filters.threshold_otsu(img)
-        binary = img > threshold_value
-        contours = measure.find_contours(binary, level=0.8, fully_connected='high')
-        return contours
+        self.doc.saveas(dxf_path, encoding='utf-8')
+        return dxf_path
 
     def get_body(self):
         layer_name = 'body'
         self.add_layer(layer_name)
+        if 'from_svg' in self.data:
+            return self.get_body_from_svg()
         return self.msp.add_circle(center=(0, 0), radius=self.data.get('obj_size', 12)/2, dxfattribs={'layer': layer_name})
+    
+    def get_body_from_svg(self):
+        svg_file_path = os.path.join(self.data['cwd'], f"{self.data['from_svg']}.svg")
+        svg = ezdxf.readfile(svg_file_path)
+        msp = svg.modelspace()
+
+        for entity in msp:
+            if entity.dxftype() == 'LINE':
+                msp.add_lwpolyline(entity.get_points(), dxfattribs={'layer': 'body'})
+        
+        return svg
 
     def get_handles(self):
         diameter: float = 1.1
@@ -65,7 +103,7 @@ class DXFProcessor:
         self.add_layer(layer_name)
         elements = []
     
-        for contour in self.process_image():
+        for contour in ImageProcessor.process_image(self.data.get("image_url"), target='dxf'):
             transformed_contour = [(y, -x) for x, y in contour]
             element = self.msp.add_lwpolyline(transformed_contour, dxfattribs=dxfattribs, close=True)
             elements.append(element)
@@ -158,24 +196,3 @@ class DXFProcessor:
         x_min, y_min, x_max, y_max = coords
         points = [(x_min, y_min), (x_min, y_max), (x_max, y_max), (x_max, y_min), (x_min, y_min)]
         self.msp.add_lwpolyline(points, dxfattribs={"layer": 'body'},close=True)
-
-    def save_dxf(self, file_path: str):
-        self.doc.audit()
-        self.doc.saveas(file_path, encoding='utf-8')
-        return file_path
-
-
-# def main(data):
-#     processor = DXFProcessor(data)
-#     processor.save_dxf()
-
-# if __name__ == "__main__":
-#     cwd = os.path.join(os.getcwd(), "assets")
-#     obj_data = {
-#         "obj_type": "necklace",
-#         "obj_size": 12,
-#         "sku": "123456",
-#         "input": f"{os.path.join(cwd, "cook.jpg")}",
-#         "output": "assets/cook.dxf"
-#     }
-#     main(obj_data)

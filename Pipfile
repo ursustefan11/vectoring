@@ -11,6 +11,7 @@ scikit-image = "*"
 pip = "*"
 pillow = "*"
 requests = "*"
+svgwrite = "*"
 
 [requires]
 python = "3.11.6"

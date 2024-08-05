@@ -3,6 +3,9 @@ from app import app
 from app.controllers import Controller
 import os
 
+# TODO 
+# SKU needs to be integer
+# obj_size needs to be integer
 @app.route('/', methods=['POST'])
 def hello():
     expected_fields = {
@@ -10,25 +13,23 @@ def hello():
         'sku': '123456',
         'obj_type': 'necklace',
         'obj_size': 12,
+        'from_svg': 'bone'
     }
     
     data = {field: request.form.get(field, default) for field, default in expected_fields.items()}
-    response = send_file(Controller(data)())
-
-    # Stop the Docker container
-    container_id = os.getenv('HOSTNAME')
-    os.system(f'docker stop {container_id}')
+    controller = Controller(data)
+    response = send_file(controller.get_archive())
 
     return response
 
-# TODO 
-# SKU needs to be integer
-# obj_size needs to be integer
+@app.route('/register-shape', methods=['POST'])
+def register_shape():
+    expected_fields = {
+        'image_url': None,
+        'obj_name': 'bone',
+    }
+    data = {field: request.form.get(field, default) for field, default in expected_fields.items()}
+    controller = Controller(data)
+    response = controller.create_svg()
 
-
-# @app.route('/view-data')
-# def view_data():
-#     response = {
-#         'data': get_processed_image(session.get('data', {})),
-#     }
-#     return jsonify(response)
+    return response

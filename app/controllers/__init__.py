@@ -1,2 +1,2 @@
-from .dxf_processor import DXFProcessor
+from .image_processor import DXFProcessor, SVGProcessor
 from .controller import Controller
